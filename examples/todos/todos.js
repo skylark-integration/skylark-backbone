@@ -4,6 +4,36 @@
 // to persist Backbone models within your browser.
 
 // Load the application once the DOM is ready, using `jQuery.ready`:
+
+require.config({
+  baseUrl: "./",
+  map: {
+      '*': {
+        'jquery': 'skylark-jquery/core'
+      }
+  },
+  shim: {
+    'backbone': {
+      deps: ['underscore', 'jquery'],
+      exports: 'Backbone'
+    },
+    'underscore': {
+      exports: '_'
+    }
+  }
+  ,packages : [
+     { name: "skylark", location: "../../test/vendor/skylark" },
+     { name: "skylark-jquery", location: "../../test/vendor/skylark-jquery" }
+  ]
+  , paths: {
+	"json2"     : "../../test/vendor/json2",
+	'underscore' : "../../test/vendor/underscore",
+	'backbone' :  "../../backbone",
+    "localStorage" : "../backbone.localStorage"
+  }
+});
+
+require(["jquery","backbone","localStorage","json2"],function($,Backbone){
 $(function(){
 
   // Todo Model
@@ -231,4 +261,5 @@ $(function(){
   // Finally, we kick things off by creating the **App**.
   var App = new AppView;
 
+});
 });
