@@ -1,5 +1,5 @@
   # skylark-backbone
   
-  A backbone version ported to running on skylarkjs library and framework.Based on: https://github.com/jashkenas/backbone
+  A version of backbone that ported to running on skylarkjs.Based on: https://github.com/jashkenas/backbone
   
  
