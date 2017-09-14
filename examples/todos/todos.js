@@ -7,11 +7,6 @@
 
 require.config({
   baseUrl: "./",
-  map: {
-      '*': {
-        'jquery': 'skylark-jquery/core'
-      }
-  },
   shim: {
     'backbone': {
       deps: ['underscore', 'jquery'],
@@ -22,14 +17,13 @@ require.config({
     }
   }
   ,packages : [
-     { name: "skylark", location: "../../test/vendor/skylark" },
-     { name: "skylark-jquery", location: "../../test/vendor/skylark-jquery" }
   ]
   , paths: {
+  "jquery"    : "http://registry.skylarkjs.org/packages/skylark-jquery/v0.9.0/uncompressed/skylark-jquery-all",
 	"json2"     : "../../test/vendor/json2",
 	'underscore' : "../../test/vendor/underscore",
 	'backbone' :  "../../backbone",
-    "localStorage" : "../backbone.localStorage"
+  "localStorage" : "../backbone.localStorage"
   }
 });
 
