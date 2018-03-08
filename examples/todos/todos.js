@@ -12,6 +12,9 @@ require.config({
       deps: ['underscore', 'jquery'],
       exports: 'Backbone'
     },
+    'skylark-jquery': {
+      deps: ['skylark-utils']
+    },
     'underscore': {
       exports: '_'
     }
@@ -19,12 +22,20 @@ require.config({
   ,packages : [
   ]
   , paths: {
-  "jquery"    : "http://registry.skylarkjs.org/packages/skylark-jquery/v0.9.0/uncompressed/skylark-jquery-all",
+  "skylark-utils"    : "http://registry.skylarkjs.org/packages/skylark-utils/v0.9.5-beta/uncompressed/skylark-utils-all",
+  "skylark-jquery"    : "http://registry.skylarkjs.org/packages/skylark-jquery/v0.9.6-beta/uncompressed/skylark-jquery",
 	"json2"     : "../../test/vendor/json2",
 	'underscore' : "../../test/vendor/underscore",
 	'backbone' :  "../../backbone",
   "localStorage" : "../backbone.localStorage"
+  },
+  "map": {
+    "*": {
+        "jquery": "skylark-jquery",
+        "jQuery": "skylark-jquery"
+    }
   }
+
 });
 
 require(["jquery","backbone","localStorage","json2"],function($,Backbone){
@@ -186,14 +197,14 @@ $(function(){
     // loading any preexisting todos that might be saved in *localStorage*.
     initialize: function() {
 
-      this.input = this.$("#new-todo");
-      this.allCheckbox = this.$("#toggle-all")[0];
+      this.input = $("#new-todo");
+      this.allCheckbox = $("#toggle-all")[0];
 
       this.listenTo(Todos, 'add', this.addOne);
       this.listenTo(Todos, 'reset', this.addAll);
       this.listenTo(Todos, 'all', this.render);
 
-      this.footer = this.$('footer');
+      this.footer = $('footer');
       this.main = $('#main');
 
       Todos.fetch();
@@ -221,7 +232,7 @@ $(function(){
     // appending its element to the `<ul>`.
     addOne: function(todo) {
       var view = new TodoView({model: todo});
-      this.$("#todo-list").append(view.render().el);
+      $("#todo-list").append(view.render().el);
     },
 
     // Add all items in the **Todos** collection at once.
