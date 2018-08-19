@@ -39,7 +39,7 @@
     models = $.skylark.models,
     Evented = $.skylark.langx.Evented,
     Stateful = $.skylark.langx.Stateful,
-    Widget = $.skylark.widget.Widget;
+    Widget = $.skylark.widgets.Widget;
 
   // Initial Setup
   // -------------
