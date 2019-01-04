@@ -4,25 +4,6 @@
 // to persist Backbone models within your browser.
 
 // Load the application once the DOM is ready, using `jQuery.ready`:
-
-require.config({
-  baseUrl: "./",
-  shim: {
-  }
-  ,packages : [
-      { name: "skylark-langx", location: "../../node_modules/skylark-langx/src" },
-      { name: "skylark-utils-dom", location: "../../node_modules/skylark-utils-dom/src" },
-      { name: "skylark-underscore", location: "../../node_modules/skylark-underscore/src" },
-      { name: "skylark-jquery", location: "../../node_modules/skylark-jquery/src" },
-      { name: "skylark-backbone", location: "../../src" }
-  ] , 
-  "map": {
-
-  }
-
-});
-
-require(["skylark-jquery","skylark-underscore","skylark-backbone"],function($,_,Backbone){
 $(function(){
 
   // Todo Model
@@ -181,14 +162,14 @@ $(function(){
     // loading any preexisting todos that might be saved in *localStorage*.
     initialize: function() {
 
-      this.input = $("#new-todo");
-      this.allCheckbox = $("#toggle-all")[0];
+      this.input = this.$("#new-todo");
+      this.allCheckbox = this.$("#toggle-all")[0];
 
       this.listenTo(Todos, 'add', this.addOne);
       this.listenTo(Todos, 'reset', this.addAll);
       this.listenTo(Todos, 'all', this.render);
 
-      this.footer = $('footer');
+      this.footer = this.$('footer');
       this.main = $('#main');
 
       Todos.fetch();
@@ -216,7 +197,7 @@ $(function(){
     // appending its element to the `<ul>`.
     addOne: function(todo) {
       var view = new TodoView({model: todo});
-      $("#todo-list").append(view.render().el);
+      this.$("#todo-list").append(view.render().el);
     },
 
     // Add all items in the **Todos** collection at once.
@@ -250,5 +231,4 @@ $(function(){
   // Finally, we kick things off by creating the **App**.
   var App = new AppView;
 
-});
 });
