@@ -1,6 +1,6 @@
 define([
   "skylark-langx/langx",
-  "./models",
+  "skylark-fw-model",
   "./backbone",
   "./events",
   "./helper"
@@ -31,7 +31,11 @@ define([
       },
       // Initialize is an empty function by default. Override it with your own
       // initialization logic.
-      initialize: function(){}
+      initialize: function(){},
+
+      sync: function() {
+        return Backbone.sync.apply(this, arguments);
+      }
 
   });
 

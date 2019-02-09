@@ -82,681 +82,16 @@
 
 define('skylark-backbone/backbone',[
 	"skylark-langx/skylark",
+    "skylark-fw-model",
 	"skylark-jquery"
-],function(skylark,$){
+],function(skylark, models,$){
 //     from Backbone.js 1.2.3
 
 //     (c) 2010-2016 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors
 //     Backbone may be freely distributed under the MIT license.
 //     For all details and documentation:
 //     http://backbonejs.org
-	var Backbone = skylark.backbone = {}
-    Backbone.$ = $;
-
-	return Backbone ;
-});
-define('skylark-backbone/models',[
-    "skylark-langx/langx"
-], function(langx) {
-
-  // Map from CRUD to HTTP for our default `Backbone.sync` implementation.
-  var methodMap = {
-    'create': 'POST',
-    'update': 'PUT',
-    'patch': 'PATCH',
-    'delete': 'DELETE',
-    'read': 'GET'
-  };
-  
-  // Wrap an optional error callback with a fallback error event.
-  var wrapError = function(model, options) {
-    var error = options.error;
-    options.error = function(resp) {
-      if (error) error.call(options.context, model, resp, options);
-      model.trigger('error', model, resp, options);
-    };
-  };
-
-  var sync = function(method, entity, options) {
-    var type = methodMap[method];
-
-    // Default options, unless specified.
-    langx.defaults(options || (options = {}), {
-      emulateHTTP: models.emulateHTTP,
-      emulateJSON: models.emulateJSON
-    });
-
-    // Default JSON-request options.
-    var params = {type: type, dataType: 'json'};
-
-    // Ensure that we have a URL.
-    if (!options.url) {
-      params.url = langx.result(entity, 'url') || urlError();
-    }
-
-    // Ensure that we have the appropriate request data.
-    if (options.data == null && entity && (method === 'create' || method === 'update' || method === 'patch')) {
-      params.contentType = 'application/json';
-      params.data = JSON.stringify(options.attrs || entity.toJSON(options));
-    }
-
-    // For older servers, emulate JSON by encoding the request into an HTML-form.
-    if (options.emulateJSON) {
-      params.contentType = 'application/x-www-form-urlencoded';
-      params.data = params.data ? {entity: params.data} : {};
-    }
-
-    // For older servers, emulate HTTP by mimicking the HTTP method with `_method`
-    // And an `X-HTTP-Method-Override` header.
-    if (options.emulateHTTP && (type === 'PUT' || type === 'DELETE' || type === 'PATCH')) {
-      params.type = 'POST';
-      if (options.emulateJSON) params.data._method = type;
-      var beforeSend = options.beforeSend;
-      options.beforeSend = function(xhr) {
-        xhr.setRequestHeader('X-HTTP-Method-Override', type);
-        if (beforeSend) return beforeSend.apply(this, arguments);
-      };
-    }
-
-    // Don't process data on a non-GET request.
-    if (params.type !== 'GET' && !options.emulateJSON) {
-      params.processData = false;
-    }
-
-    // Pass along `textStatus` and `errorThrown` from jQuery.
-    var error = options.error;
-    options.error = function(xhr, textStatus, errorThrown) {
-      options.textStatus = textStatus;
-      options.errorThrown = errorThrown;
-      if (error) error.call(options.context, xhr, textStatus, errorThrown);
-    };
-
-    // Make the request, allowing the user to override any Ajax options.
-    var xhr = options.xhr = langx.Xhr.request(langx.mixin(params, options));
-    entity.trigger('request', entity, xhr, options);
-    return xhr;
-  };
-
-
-  var Entity = langx.Stateful.inherit({
-    sync: function() {
-      return models.sync.apply(this, arguments);
-    },
-
-    // Get the HTML-escaped value of an attribute.
-    //escape: function(attr) {
-    //  return _.escape(this.get(attr));
-    //},
-
-    // Special-cased proxy to underscore's `_.matches` method.
-    matches: function(attrs) {
-      return langx.isMatch(this.attributes,attrs);
-    },
-
-    // Fetch the entity from the server, merging the response with the entity's
-    // local attributes. Any changed attributes will trigger a "change" event.
-    fetch: function(options) {
-      options = langx.mixin({parse: true}, options);
-      var entity = this;
-      var success = options.success;
-      options.success = function(resp) {
-        var serverAttrs = options.parse ? entity.parse(resp, options) : resp;
-        if (!entity.set(serverAttrs, options)) return false;
-        if (success) success.call(options.context, entity, resp, options);
-        entity.trigger('sync', entity, resp, options);
-      };
-      wrapError(this, options);
-      return this.sync('read', this, options);
-    },
-
-    // Set a hash of entity attributes, and sync the entity to the server.
-    // If the server returns an attributes hash that differs, the entity's
-    // state will be `set` again.
-    save: function(key, val, options) {
-      // Handle both `"key", value` and `{key: value}` -style arguments.
-      var attrs;
-      if (key == null || typeof key === 'object') {
-        attrs = key;
-        options = val;
-      } else {
-        (attrs = {})[key] = val;
-      }
-
-      options = langx.mixin({validate: true, parse: true}, options);
-      var wait = options.wait;
-
-      // If we're not waiting and attributes exist, save acts as
-      // `set(attr).save(null, opts)` with validation. Otherwise, check if
-      // the entity will be valid when the attributes, if any, are set.
-      if (attrs && !wait) {
-        if (!this.set(attrs, options)) return false;
-      } else if (!this._validate(attrs, options)) {
-        return false;
-      }
-
-      // After a successful server-side save, the client is (optionally)
-      // updated with the server-side state.
-      var entity = this;
-      var success = options.success;
-      var attributes = this.attributes;
-      options.success = function(resp) {
-        // Ensure attributes are restored during synchronous saves.
-        entity.attributes = attributes;
-        var serverAttrs = options.parse ? entity.parse(resp, options) : resp;
-        if (wait) serverAttrs = langx.mixin({}, attrs, serverAttrs);
-        if (serverAttrs && !entity.set(serverAttrs, options)) return false;
-        if (success) success.call(options.context, entity, resp, options);
-        entity.trigger('sync', entity, resp, options);
-      };
-      wrapError(this, options);
-
-      // Set temporary attributes if `{wait: true}` to properly find new ids.
-      if (attrs && wait) this.attributes = langx.mixin({}, attributes, attrs);
-
-      var method = this.isNew() ? 'create' : (options.patch ? 'patch' : 'update');
-      if (method === 'patch' && !options.attrs) options.attrs = attrs;
-      var xhr = this.sync(method, this, options);
-
-      // Restore attributes.
-      this.attributes = attributes;
-
-      return xhr;
-    },
-
-    // Destroy this entity on the server if it was already persisted.
-    // Optimistically removes the entity from its collection, if it has one.
-    // If `wait: true` is passed, waits for the server to respond before removal.
-    destroy: function(options) {
-      options = options ? langx.clone(options) : {};
-      var entity = this;
-      var success = options.success;
-      var wait = options.wait;
-
-      var destroy = function() {
-        entity.stopListening();
-        entity.trigger('destroy', entity, entity.collection, options);
-      };
-
-      options.success = function(resp) {
-        if (wait) destroy();
-        if (success) success.call(options.context, entity, resp, options);
-        if (!entity.isNew()) entity.trigger('sync', entity, resp, options);
-      };
-
-      var xhr = false;
-      if (this.isNew()) {
-        langx.defer(options.success);
-      } else {
-        wrapError(this, options);
-        xhr = this.sync('delete', this, options);
-      }
-      if (!wait) destroy();
-      return xhr;
-    },
-
-    // Default URL for the entity's representation on the server -- if you're
-    // using Backbone's restful methods, override this to change the endpoint
-    // that will be called.
-    url: function() {
-      var base =
-        langx.result(this, 'urlRoot') ||
-        langx.result(this.collection, 'url') ||
-        urlError();
-      if (this.isNew()) return base;
-      var id = this.get(this.idAttribute);
-      return base.replace(/[^\/]$/, '$&/') + encodeURIComponent(id);
-    },
-
-    // **parse** converts a response into the hash of attributes to be `set` on
-    // the entity. The default implementation is just to pass the response along.
-    parse: function(resp, options) {
-      return resp;
-    }
-  });
-
-  var Collection  = langx.Evented.inherit({
-    "_construct" : function(entities, options) {
-      options || (options = {});
-      if (options.entity) this.entity = options.entity;
-      if (options.comparator !== void 0) this.comparator = options.comparator;
-      this._reset();
-      if (entities) this.reset(entities, langx.mixin({silent: true}, options));
-    }
-  }); 
-
-  // Default options for `Collection#set`.
-  var setOptions = {add: true, remove: true, merge: true};
-  var addOptions = {add: true, remove: false};
-
-  // Splices `insert` into `array` at index `at`.
-  var splice = function(array, insert, at) {
-    at = Math.min(Math.max(at, 0), array.length);
-    var tail = Array(array.length - at);
-    var length = insert.length;
-    var i;
-    for (i = 0; i < tail.length; i++) tail[i] = array[i + at];
-    for (i = 0; i < length; i++) array[i + at] = insert[i];
-    for (i = 0; i < tail.length; i++) array[i + length + at] = tail[i];
-  };
-
-  // Define the Collection's inheritable methods.
-  Collection.partial({
-
-    // The default entity for a collection is just a **Entity**.
-    // This should be overridden in most cases.
-    entity: Entity,
-
-    // Initialize is an empty function by default. Override it with your own
-    // initialization logic.
-    initialize: function(){},
-
-    // The JSON representation of a Collection is an array of the
-    // entities' attributes.
-    toJSON: function(options) {
-      return this.map(function(entity) { return entity.toJSON(options); });
-    },
-
-    // Proxy `models.sync` by default.
-    sync: function() {
-      return models.sync.apply(this, arguments);
-    },
-
-    // Add a entity, or list of entities to the set. `entities` may be Backbone
-    // Entitys or raw JavaScript objects to be converted to Entitys, or any
-    // combination of the two.
-    add: function(entities, options) {
-      return this.set(entities, langx.mixin({merge: false}, options, addOptions));
-    },
-
-    // Remove a entity, or a list of entities from the set.
-    remove: function(entities, options) {
-      options = langx.mixin({}, options);
-      var singular = !langx.isArray(entities);
-      entities = singular ? [entities] : entities.slice();
-      var removed = this._removeEntitys(entities, options);
-      if (!options.silent && removed.length) {
-        options.changes = {added: [], merged: [], removed: removed};
-        this.trigger('update', this, options);
-      }
-      return singular ? removed[0] : removed;
-    },
-
-    // Update a collection by `set`-ing a new list of entities, adding new ones,
-    // removing entities that are no longer present, and merging entities that
-    // already exist in the collection, as necessary. Similar to **Entity#set**,
-    // the core operation for updating the data contained by the collection.
-    set: function(entities, options) {
-      if (entities == null) return;
-
-      options = langx.mixin({}, setOptions, options);
-      if (options.parse && !this._isEntity(entities)) {
-        entities = this.parse(entities, options) || [];
-      }
-
-      var singular = !langx.isArray(entities);
-      entities = singular ? [entities] : entities.slice();
-
-      var at = options.at;
-      if (at != null) at = +at;
-      if (at > this.length) at = this.length;
-      if (at < 0) at += this.length + 1;
-
-      var set = [];
-      var toAdd = [];
-      var toMerge = [];
-      var toRemove = [];
-      var modelMap = {};
-
-      var add = options.add;
-      var merge = options.merge;
-      var remove = options.remove;
-
-      var sort = false;
-      var sortable = this.comparator && at == null && options.sort !== false;
-      var sortAttr = langx.isString(this.comparator) ? this.comparator : null;
-
-      // Turn bare objects into entity references, and prevent invalid entities
-      // from being added.
-      var entity, i;
-      for (i = 0; i < entities.length; i++) {
-        entity = entities[i];
-
-        // If a duplicate is found, prevent it from being added and
-        // optionally merge it into the existing entity.
-        var existing = this.get(entity);
-        if (existing) {
-          if (merge && entity !== existing) {
-            var attrs = this._isEntity(entity) ? entity.attributes : entity;
-            if (options.parse) attrs = existing.parse(attrs, options);
-            existing.set(attrs, options);
-            toMerge.push(existing);
-            if (sortable && !sort) sort = existing.hasChanged(sortAttr);
-          }
-          if (!modelMap[existing.cid]) {
-            modelMap[existing.cid] = true;
-            set.push(existing);
-          }
-          entities[i] = existing;
-
-        // If this is a new, valid entity, push it to the `toAdd` list.
-        } else if (add) {
-          entity = entities[i] = this._prepareEntity(entity, options);
-          if (entity) {
-            toAdd.push(entity);
-            this._addReference(entity, options);
-            modelMap[entity.cid] = true;
-            set.push(entity);
-          }
-        }
-      }
-
-      // Remove stale entities.
-      if (remove) {
-        for (i = 0; i < this.length; i++) {
-          entity = this.entities[i];
-          if (!modelMap[entity.cid]) toRemove.push(entity);
-        }
-        if (toRemove.length) this._removeEntitys(toRemove, options);
-      }
-
-      // See if sorting is needed, update `length` and splice in new entities.
-      var orderChanged = false;
-      var replace = !sortable && add && remove;
-      if (set.length && replace) {
-        orderChanged = this.length !== set.length || this.entities.some(function(m, index) {
-          return m !== set[index];
-        });
-        this.entities.length = 0;
-        splice(this.entities, set, 0);
-        this.length = this.entities.length;
-      } else if (toAdd.length) {
-        if (sortable) sort = true;
-        splice(this.entities, toAdd, at == null ? this.length : at);
-        this.length = this.entities.length;
-      }
-
-      // Silently sort the collection if appropriate.
-      if (sort) this.sort({silent: true});
-
-      // Unless silenced, it's time to fire all appropriate add/sort/update events.
-      if (!options.silent) {
-        for (i = 0; i < toAdd.length; i++) {
-          if (at != null) options.index = at + i;
-          entity = toAdd[i];
-          entity.trigger('add', entity, this, options);
-        }
-        if (sort || orderChanged) this.trigger('sort', this, options);
-        if (toAdd.length || toRemove.length || toMerge.length) {
-          options.changes = {
-            added: toAdd,
-            removed: toRemove,
-            merged: toMerge
-          };
-          this.trigger('update', this, options);
-        }
-      }
-
-      // Return the added (or merged) entity (or entities).
-      return singular ? entities[0] : entities;
-    },
-
-    // When you have more items than you want to add or remove individually,
-    // you can reset the entire set with a new list of entities, without firing
-    // any granular `add` or `remove` events. Fires `reset` when finished.
-    // Useful for bulk operations and optimizations.
-    reset: function(entities, options) {
-      options = options ? langx.clone(options) : {};
-      for (var i = 0; i < this.entities.length; i++) {
-        this._removeReference(this.entities[i], options);
-      }
-      options.previousEntitys = this.entities;
-      this._reset();
-      entities = this.add(entities, langx.mixin({silent: true}, options));
-      if (!options.silent) this.trigger('reset', this, options);
-      return entities;
-    },
-
-    // Add a entity to the end of the collection.
-    push: function(entity, options) {
-      return this.add(entity, langx.mixin({at: this.length}, options));
-    },
-
-    // Remove a entity from the end of the collection.
-    pop: function(options) {
-      var entity = this.at(this.length - 1);
-      return this.remove(entity, options);
-    },
-
-    // Add a entity to the beginning of the collection.
-    unshift: function(entity, options) {
-      return this.add(entity, langx.mixin({at: 0}, options));
-    },
-
-    // Remove a entity from the beginning of the collection.
-    shift: function(options) {
-      var entity = this.at(0);
-      return this.remove(entity, options);
-    },
-
-    // Slice out a sub-array of entities from the collection.
-    slice: function() {
-      return slice.apply(this.entities, arguments);
-    },
-
-    // Get a entity from the set by id, cid, entity object with id or cid
-    // properties, or an attributes object that is transformed through entityId.
-    get: function(obj) {
-      if (obj == null) return void 0;
-      return this._byId[obj] ||
-        this._byId[this.entityId(obj.attributes || obj)] ||
-        obj.cid && this._byId[obj.cid];
-    },
-
-    // Returns `true` if the entity is in the collection.
-    has: function(obj) {
-      return this.get(obj) != null;
-    },
-
-    // Get the entity at the given index.
-    at: function(index) {
-      if (index < 0) index += this.length;
-      return this.entities[index];
-    },
-
-    // Return entities with matching attributes. Useful for simple cases of
-    // `filter`.
-    where: function(attrs, first) {
-      return this[first ? 'find' : 'filter'](attrs);
-    },
-
-    // Return the first entity with matching attributes. Useful for simple cases
-    // of `find`.
-    findWhere: function(attrs) {
-      return this.where(attrs, true);
-    },
-
-    // Force the collection to re-sort itself. You don't need to call this under
-    // normal circumstances, as the set will maintain sort order as each item
-    // is added.
-    sort: function(options) {
-      var comparator = this.comparator;
-      if (!comparator) throw new Error('Cannot sort a set without a comparator');
-      options || (options = {});
-
-      var length = comparator.length;
-      if (langx.isFunction(comparator)) comparator = langx.proxy(comparator, this);
-
-      // Run sort based on type of `comparator`.
-      if (length === 1 || langx.isString(comparator)) {
-        this.entities = this.sortBy(comparator);
-      } else {
-        this.entities.sort(comparator);
-      }
-      if (!options.silent) this.trigger('sort', this, options);
-      return this;
-    },
-
-    // Pluck an attribute from each entity in the collection.
-    pluck: function(attr) {
-      return this.map(attr + '');
-    },
-
-    // Fetch the default set of entities for this collection, resetting the
-    // collection when they arrive. If `reset: true` is passed, the response
-    // data will be passed through the `reset` method instead of `set`.
-    fetch: function(options) {
-      options = langx.mixin({parse: true}, options);
-      var success = options.success;
-      var collection = this;
-      options.success = function(resp) {
-        var method = options.reset ? 'reset' : 'set';
-        collection[method](resp, options);
-        if (success) success.call(options.context, collection, resp, options);
-        collection.trigger('sync', collection, resp, options);
-      };
-      wrapError(this, options);
-      return this.sync('read', this, options);
-    },
-
-    // Create a new instance of a entity in this collection. Add the entity to the
-    // collection immediately, unless `wait: true` is passed, in which case we
-    // wait for the server to agree.
-    create: function(entity, options) {
-      options = options ? langx.clone(options) : {};
-      var wait = options.wait;
-      entity = this._prepareEntity(entity, options);
-      if (!entity) return false;
-      if (!wait) this.add(entity, options);
-      var collection = this;
-      var success = options.success;
-      options.success = function(m, resp, callbackOpts) {
-        if (wait) collection.add(m, callbackOpts);
-        if (success) success.call(callbackOpts.context, m, resp, callbackOpts);
-      };
-      entity.save(null, options);
-      return entity;
-    },
-
-    // **parse** converts a response into a list of entities to be added to the
-    // collection. The default implementation is just to pass it through.
-    parse: function(resp, options) {
-      return resp;
-    },
-
-    // Create a new collection with an identical list of entities as this one.
-    clone: function() {
-      return new this.constructor(this.entities, {
-        entity: this.entity,
-        comparator: this.comparator
-      });
-    },
-
-    // Define how to uniquely identify entities in the collection.
-    entityId: function(attrs) {
-      return attrs[this.entity.prototype.idAttribute || 'id'];
-    },
-
-    // Private method to reset all internal state. Called when the collection
-    // is first initialized or reset.
-    _reset: function() {
-      this.length = 0;
-      this.entities = [];
-      this._byId  = {};
-    },
-
-    // Prepare a hash of attributes (or other entity) to be added to this
-    // collection.
-    _prepareEntity: function(attrs, options) {
-      if (this._isEntity(attrs)) {
-        if (!attrs.collection) attrs.collection = this;
-        return attrs;
-      }
-      options = options ? langx.clone(options) : {};
-      options.collection = this;
-      var entity = new this.entity(attrs, options);
-      if (!entity.validationError) return entity;
-      this.trigger('invalid', this, entity.validationError, options);
-      return false;
-    },
-
-    // Internal method called by both remove and set.
-    _removeEntitys: function(entities, options) {
-      var removed = [];
-      for (var i = 0; i < entities.length; i++) {
-        var entity = this.get(entities[i]);
-        if (!entity) continue;
-
-        var index = this.indexOf(entity);
-        this.entities.splice(index, 1);
-        this.length--;
-
-        // Remove references before triggering 'remove' event to prevent an
-        // infinite loop. #3693
-        delete this._byId[entity.cid];
-        var id = this.entityId(entity.attributes);
-        if (id != null) delete this._byId[id];
-
-        if (!options.silent) {
-          options.index = index;
-          entity.trigger('remove', entity, this, options);
-        }
-
-        removed.push(entity);
-        this._removeReference(entity, options);
-      }
-      return removed;
-    },
-
-    // Method for checking whether an object should be considered a entity for
-    // the purposes of adding to the collection.
-    _isEntity: function(entity) {
-      return entity instanceof Entity;
-    },
-
-    // Internal method to create a entity's ties to a collection.
-    _addReference: function(entity, options) {
-      this._byId[entity.cid] = entity;
-      var id = this.entityId(entity.attributes);
-      if (id != null) this._byId[id] = entity;
-      entity.on('all', this._onEntityEvent, this);
-    },
-
-    // Internal method to sever a entity's ties to a collection.
-    _removeReference: function(entity, options) {
-      delete this._byId[entity.cid];
-      var id = this.entityId(entity.attributes);
-      if (id != null) delete this._byId[id];
-      if (this === entity.collection) delete entity.collection;
-      entity.off('all', this._onEntityEvent, this);
-    },
-
-    // Internal method called every time a entity in the set fires an event.
-    // Sets need to update their indexes when entities change ids. All other
-    // events simply proxy through. "add" and "remove" events that originate
-    // in other collections are ignored.
-    _onEntityEvent: function(event, entity, collection, options) {
-      if (entity) {
-        if ((event === 'add' || event === 'remove') && collection !== this) return;
-        if (event === 'destroy') this.remove(entity, options);
-        if (event === 'change') {
-          var prevId = this.entityId(entity.previousAttributes());
-          var id = this.entityId(entity.attributes);
-          if (prevId !== id) {
-            if (prevId != null) delete this._byId[prevId];
-            if (id != null) this._byId[id] = entity;
-          }
-        }
-      }
-      this.trigger.apply(this, arguments);
-    }
-
-  });
-
-    function models() {
-        return models;
-    }
-
-    langx.mixin(models, {
+	var Backbone = skylark.backbone = {
         // set a `X-Http-Method-Override` header.
         emulateHTTP : false,
 
@@ -766,16 +101,22 @@ define('skylark-backbone/models',[
         // form param named `model`.
         emulateJSON : false,
 
-        sync : sync,
+	}
+    
+    Backbone.$ = $;
 
-        Entity: Entity,
-        Collection : Collection
-    });
+    Backbone.sync =    function(method, entity, options) {
+	    // Default options, unless specified.
+	    langx.defaults(options || (options = {}), {
+	      emulateHTTP: Backbone.emulateHTTP,
+	      emulateJSON: Backbone.emulateJSON
+	    });
+	    return models.backends.ajaxSync.apply(this,[method,entity,options]);
+	};
 
 
-    return models;
+	return Backbone ;
 });
-
 define('skylark-backbone/events',[
   "skylark-langx/langx",
   "./backbone"
@@ -913,7 +254,7 @@ define('skylark-backbone/helper',[
 });
 define('skylark-backbone/Collection',[
   "skylark-langx/langx",
-  "./models",
+  "skylark-fw-model",
   "./backbone",
   "./events",
   "./helper"
@@ -944,7 +285,11 @@ define('skylark-backbone/Collection',[
       },
       // Initialize is an empty function by default. Override it with your own
       // initialization logic.
-      initialize: function(){}
+      initialize: function(){},
+
+      sync: function() {
+        return Backbone.sync.apply(this, arguments);
+      }
 
   });
 
@@ -989,7 +334,7 @@ define('skylark-backbone/Collection',[
 define('skylark-backbone/Model',[
   "skylark-langx/langx",
   "skylark-underscore/underscore",
-  "./models",
+  "skylark-fw-model",
   "./backbone",
   "./events",
   "./helper"
@@ -1022,8 +367,13 @@ define('skylark-backbone/Model',[
       // Special-cased proxy to underscore's `_.matches` method.
       matches: function(attrs) {
         return !!_.iteratee(attrs, this)(this.attributes);
+      },
+
+      // Proxy `Backbone.sync` by default.
+      sync: function() {
+        return Backbone.sync.apply(this, arguments);
       }
-  });
+ });
 
 
 
@@ -1034,6 +384,450 @@ define('skylark-backbone/Model',[
 
   return Model;
 });
+define('skylark-backbone/History',[
+  "skylark-langx/langx",
+  "skylark-underscore/underscore",
+  "./backbone",
+  "./events",
+  "./helper"
+],function(langx,_,Backbone,events,helper){
+
+ // Backbone.History
+  // ----------------
+
+  // Handles cross-browser history management, based on either
+  // [pushState](http://diveintohtml5.info/history.html) and real URLs, or
+  // [onhashchange](https://developer.mozilla.org/en-US/docs/DOM/window.onhashchange)
+  // and URL fragments. If the browser supports neither (old IE, natch),
+  // falls back to polling.
+  var History = Backbone.History = events.BackboneEvented.inherit({
+    _construct : function() {
+        this.handlers = [];
+        this.checkUrl = _.bind(this.checkUrl, this);
+    
+        // Ensure that `History` can be used outside of the browser.
+        if (typeof window !== 'undefined') {
+          this.location = window.location;
+          this.history = window.history;
+        }
+    }
+  });
+
+  // Cached regex for stripping a leading hash/slash and trailing space.
+  var routeStripper = /^[#\/]|\s+$/g;
+
+  // Cached regex for stripping leading and trailing slashes.
+  var rootStripper = /^\/+|\/+$/g;
+
+  // Cached regex for stripping urls of hash.
+  var pathStripper = /#.*$/;
+
+  // Has the history handling already been started?
+  History.started = false;
+
+  // Set up all inheritable **Backbone.History** properties and methods.
+  History.partial({
+
+    // The default interval to poll for hash changes, if necessary, is
+    // twenty times a second.
+    interval: 50,
+
+    // Are we at the app root?
+    atRoot: function() {
+      var path = this.location.pathname.replace(/[^\/]$/, '$&/');
+      return path === this.root && !this.getSearch();
+    },
+
+    // Does the pathname match the root?
+    matchRoot: function() {
+      var path = this.decodeFragment(this.location.pathname);
+      var rootPath = path.slice(0, this.root.length - 1) + '/';
+      return rootPath === this.root;
+    },
+
+    // Unicode characters in `location.pathname` are percent encoded so they're
+    // decoded for comparison. `%25` should not be decoded since it may be part
+    // of an encoded parameter.
+    decodeFragment: function(fragment) {
+      return decodeURI(fragment.replace(/%25/g, '%2525'));
+    },
+
+    // In IE6, the hash fragment and search params are incorrect if the
+    // fragment contains `?`.
+    getSearch: function() {
+      var match = this.location.href.replace(/#.*/, '').match(/\?.+/);
+      return match ? match[0] : '';
+    },
+
+    // Gets the true hash value. Cannot use location.hash directly due to bug
+    // in Firefox where location.hash will always be decoded.
+    getHash: function(window) {
+      var match = (window || this).location.href.match(/#(.*)$/);
+      return match ? match[1] : '';
+    },
+
+    // Get the pathname and search params, without the root.
+    getPath: function() {
+      var path = this.decodeFragment(
+        this.location.pathname + this.getSearch()
+      ).slice(this.root.length - 1);
+      return path.charAt(0) === '/' ? path.slice(1) : path;
+    },
+
+    // Get the cross-browser normalized URL fragment from the path or hash.
+    getFragment: function(fragment) {
+      if (fragment == null) {
+        if (this._usePushState || !this._wantsHashChange) {
+          fragment = this.getPath();
+        } else {
+          fragment = this.getHash();
+        }
+      }
+      return fragment.replace(routeStripper, '');
+    },
+
+    // Start the hash change handling, returning `true` if the current URL matches
+    // an existing route, and `false` otherwise.
+    start: function(options) {
+      if (History.started) throw new Error('Backbone.history has already been started');
+      History.started = true;
+
+      // Figure out the initial configuration. Do we need an iframe?
+      // Is pushState desired ... is it available?
+      this.options          = _.extend({root: '/'}, this.options, options);
+      this.root             = this.options.root;
+      this._wantsHashChange = this.options.hashChange !== false;
+      this._hasHashChange   = 'onhashchange' in window && (document.documentMode === void 0 || document.documentMode > 7);
+      this._useHashChange   = this._wantsHashChange && this._hasHashChange;
+      this._wantsPushState  = !!this.options.pushState;
+      this._hasPushState    = !!(this.history && this.history.pushState);
+      this._usePushState    = this._wantsPushState && this._hasPushState;
+      this.fragment         = this.getFragment();
+
+      // Normalize root to always include a leading and trailing slash.
+      this.root = ('/' + this.root + '/').replace(rootStripper, '/');
+
+      // Transition from hashChange to pushState or vice versa if both are
+      // requested.
+      if (this._wantsHashChange && this._wantsPushState) {
+
+        // If we've started off with a route from a `pushState`-enabled
+        // browser, but we're currently in a browser that doesn't support it...
+        if (!this._hasPushState && !this.atRoot()) {
+          var rootPath = this.root.slice(0, -1) || '/';
+          this.location.replace(rootPath + '#' + this.getPath());
+          // Return immediately as browser will do redirect to new url
+          return true;
+
+        // Or if we've started out with a hash-based route, but we're currently
+        // in a browser where it could be `pushState`-based instead...
+        } else if (this._hasPushState && this.atRoot()) {
+          this.navigate(this.getHash(), {replace: true});
+        }
+
+      }
+
+      // Proxy an iframe to handle location events if the browser doesn't
+      // support the `hashchange` event, HTML5 history, or the user wants
+      // `hashChange` but not `pushState`.
+      if (!this._hasHashChange && this._wantsHashChange && !this._usePushState) {
+        this.iframe = document.createElement('iframe');
+        this.iframe.src = 'javascript:0';
+        this.iframe.style.display = 'none';
+        this.iframe.tabIndex = -1;
+        var body = document.body;
+        // Using `appendChild` will throw on IE < 9 if the document is not ready.
+        var iWindow = body.insertBefore(this.iframe, body.firstChild).contentWindow;
+        iWindow.document.open();
+        iWindow.document.close();
+        iWindow.location.hash = '#' + this.fragment;
+      }
+
+      // Add a cross-platform `addEventListener` shim for older browsers.
+      var addEventListener = window.addEventListener || function(eventName, listener) {
+        return attachEvent('on' + eventName, listener);
+      };
+
+      // Depending on whether we're using pushState or hashes, and whether
+      // 'onhashchange' is supported, determine how we check the URL state.
+      if (this._usePushState) {
+        addEventListener('popstate', this.checkUrl, false);
+      } else if (this._useHashChange && !this.iframe) {
+        addEventListener('hashchange', this.checkUrl, false);
+      } else if (this._wantsHashChange) {
+        this._checkUrlInterval = setInterval(this.checkUrl, this.interval);
+      }
+
+      if (!this.options.silent) return this.loadUrl();
+    },
+
+    // Disable Backbone.history, perhaps temporarily. Not useful in a real app,
+    // but possibly useful for unit testing Routers.
+    stop: function() {
+      // Add a cross-platform `removeEventListener` shim for older browsers.
+      var removeEventListener = window.removeEventListener || function(eventName, listener) {
+        return detachEvent('on' + eventName, listener);
+      };
+
+      // Remove window listeners.
+      if (this._usePushState) {
+        removeEventListener('popstate', this.checkUrl, false);
+      } else if (this._useHashChange && !this.iframe) {
+        removeEventListener('hashchange', this.checkUrl, false);
+      }
+
+      // Clean up the iframe if necessary.
+      if (this.iframe) {
+        document.body.removeChild(this.iframe);
+        this.iframe = null;
+      }
+
+      // Some environments will throw when clearing an undefined interval.
+      if (this._checkUrlInterval) clearInterval(this._checkUrlInterval);
+      History.started = false;
+    },
+
+    // Add a route to be tested when the fragment changes. Routes added later
+    // may override previous routes.
+    route: function(route, callback) {
+      this.handlers.unshift({route: route, callback: callback});
+    },
+
+    // Checks the current URL to see if it has changed, and if it has,
+    // calls `loadUrl`, normalizing across the hidden iframe.
+    checkUrl: function(e) {
+      var current = this.getFragment();
+
+      // If the user pressed the back button, the iframe's hash will have
+      // changed and we should use that for comparison.
+      if (current === this.fragment && this.iframe) {
+        current = this.getHash(this.iframe.contentWindow);
+      }
+
+      if (current === this.fragment) return false;
+      if (this.iframe) this.navigate(current);
+      this.loadUrl();
+    },
+
+    // Attempt to load the current URL fragment. If a route succeeds with a
+    // match, returns `true`. If no defined routes matches the fragment,
+    // returns `false`.
+    loadUrl: function(fragment) {
+      // If the root doesn't match, no routes can match either.
+      if (!this.matchRoot()) return false;
+      fragment = this.fragment = this.getFragment(fragment);
+      return _.some(this.handlers, function(handler) {
+        if (handler.route.test(fragment)) {
+          handler.callback(fragment);
+          return true;
+        }
+      });
+    },
+
+    // Save a fragment into the hash history, or replace the URL state if the
+    // 'replace' option is passed. You are responsible for properly URL-encoding
+    // the fragment in advance.
+    //
+    // The options object can contain `trigger: true` if you wish to have the
+    // route callback be fired (not usually desirable), or `replace: true`, if
+    // you wish to modify the current URL without adding an entry to the history.
+    navigate: function(fragment, options) {
+      if (!History.started) return false;
+      if (!options || options === true) options = {trigger: !!options};
+
+      // Normalize the fragment.
+      fragment = this.getFragment(fragment || '');
+
+      // Don't include a trailing slash on the root.
+      var rootPath = this.root;
+      if (fragment === '' || fragment.charAt(0) === '?') {
+        rootPath = rootPath.slice(0, -1) || '/';
+      }
+      var url = rootPath + fragment;
+
+      // Strip the hash and decode for matching.
+      fragment = this.decodeFragment(fragment.replace(pathStripper, ''));
+
+      if (this.fragment === fragment) return;
+      this.fragment = fragment;
+
+      // If pushState is available, we use it to set the fragment as a real URL.
+      if (this._usePushState) {
+        this.history[options.replace ? 'replaceState' : 'pushState']({}, document.title, url);
+
+      // If hash changes haven't been explicitly disabled, update the hash
+      // fragment to store history.
+      } else if (this._wantsHashChange) {
+        this._updateHash(this.location, fragment, options.replace);
+        if (this.iframe && fragment !== this.getHash(this.iframe.contentWindow)) {
+          var iWindow = this.iframe.contentWindow;
+
+          // Opening and closing the iframe tricks IE7 and earlier to push a
+          // history entry on hash-tag change.  When replace is true, we don't
+          // want this.
+          if (!options.replace) {
+            iWindow.document.open();
+            iWindow.document.close();
+          }
+
+          this._updateHash(iWindow.location, fragment, options.replace);
+        }
+
+      // If you've told us that you explicitly don't want fallback hashchange-
+      // based history, then `navigate` becomes a page refresh.
+      } else {
+        return this.location.assign(url);
+      }
+      if (options.trigger) return this.loadUrl(fragment);
+    },
+
+    // Update the hash location, either replacing the current entry, or adding
+    // a new one to the browser history.
+    _updateHash: function(location, fragment, replace) {
+      if (replace) {
+        var href = location.href.replace(/(javascript:|#).*$/, '');
+        location.replace(href + '#' + fragment);
+      } else {
+        // Some browsers require that `hash` contains a leading #.
+        location.hash = '#' + fragment;
+      }
+    }
+
+  });
+
+  // Create the default Backbone.history.
+  Backbone.history = new History;
+
+  // Set up inheritance for the model, collection, router, view and history.
+  History.extend = Backbone.extend ;
+
+
+  return History;
+
+});
+
+
+define('skylark-backbone/Router',[
+  "skylark-langx/langx",
+  "skylark-underscore/underscore",
+  "./backbone",
+  "./events",
+  "./helper"
+],function(langx,_,Backbone,events,helper){
+
+  // Backbone.Router
+  // ---------------
+
+  // Routers map faux-URLs to actions, and fire events when routes are
+  // matched. Creating a new one sets its `routes` hash, if not set statically.
+  var Router = Backbone.Router = events.BackboneEvented.inherit({
+    _construct : function(options) {
+        options || (options = {});
+        if (options.routes) this.routes = options.routes;
+        this._bindRoutes();
+        this.initialize.apply(this, arguments);
+    }
+  });
+
+
+  // Cached regular expressions for matching named param parts and splatted
+  // parts of route strings.
+  var optionalParam = /\((.*?)\)/g;
+  var namedParam    = /(\(\?)?:\w+/g;
+  var splatParam    = /\*\w+/g;
+  var escapeRegExp  = /[\-{}\[\]+?.,\\\^$|#\s]/g;
+
+  // Set up all inheritable **Backbone.Router** properties and methods.
+  Router.partial({
+
+    // Initialize is an empty function by default. Override it with your own
+    // initialization logic.
+    initialize: function(){},
+
+    // Manually bind a single named route to a callback. For example:
+    //
+    //     this.route('search/:query/p:num', 'search', function(query, num) {
+    //       ...
+    //     });
+    //
+    route: function(route, name, callback) {
+      if (!_.isRegExp(route)) route = this._routeToRegExp(route);
+      if (_.isFunction(name)) {
+        callback = name;
+        name = '';
+      }
+      if (!callback) callback = this[name];
+      var router = this;
+      Backbone.history.route(route, function(fragment) {
+        var args = router._extractParameters(route, fragment);
+        if (router.execute(callback, args, name) !== false) {
+          router.trigger.apply(router, ['route:' + name].concat(args));
+          router.trigger('route', name, args);
+          Backbone.history.trigger('route', router, name, args);
+        }
+      });
+      return this;
+    },
+
+    // Execute a route handler with the provided parameters.  This is an
+    // excellent place to do pre-route setup or post-route cleanup.
+    execute: function(callback, args, name) {
+      if (callback) callback.apply(this, args);
+    },
+
+    // Simple proxy to `Backbone.history` to save a fragment into the history.
+    navigate: function(fragment, options) {
+      Backbone.history.navigate(fragment, options);
+      return this;
+    },
+
+    // Bind all defined routes to `Backbone.history`. We have to reverse the
+    // order of the routes here to support behavior where the most general
+    // routes can be defined at the bottom of the route map.
+    _bindRoutes: function() {
+      if (!this.routes) return;
+      this.routes = _.result(this, 'routes');
+      var route, routes = _.keys(this.routes);
+      while ((route = routes.pop()) != null) {
+        this.route(route, this.routes[route]);
+      }
+    },
+
+    // Convert a route string into a regular expression, suitable for matching
+    // against the current location hash.
+    _routeToRegExp: function(route) {
+      route = route.replace(escapeRegExp, '\\$&')
+                   .replace(optionalParam, '(?:$1)?')
+                   .replace(namedParam, function(match, optional) {
+                     return optional ? match : '([^/?]+)';
+                   })
+                   .replace(splatParam, '([^?]*?)');
+      return new RegExp('^' + route + '(?:\\?([\\s\\S]*))?$');
+    },
+
+    // Given a route, and a URL fragment that it matches, return the array of
+    // extracted decoded parameters. Empty or unmatched parameters will be
+    // treated as `null` to normalize cross-browser behavior.
+    _extractParameters: function(route, fragment) {
+      var params = route.exec(fragment).slice(1);
+      return _.map(params, function(param, i) {
+        // Don't decode the search params.
+        if (i === params.length - 1) return param || null;
+        return param ? decodeURIComponent(param) : null;
+      });
+    }
+
+  });
+
+  // Set up inheritance for the model, collection, router, view and history.
+  Router.extend = helper.extend;
+
+
+  return Router;
+
+});
+
+
 define('skylark-backbone/View',[
   "skylark-langx/langx",
   "skylark-utils-dom/query",
@@ -1219,187 +1013,14 @@ define('skylark-backbone/View',[
 
   return View;
 });
-define('skylark-backbone/LocalStorage',[
-  "skylark-langx/langx",
-  "skylark-underscore",
-  "./models",
-  "./backbone"
-],function(langx,_,models,Backbone){
-
-// A simple module to replace `Backbone.sync` with *localStorage*-based
-// persistence. Models are given GUIDS, and saved into a JSON object. Simple
-// as that.
-
-// Hold reference to Underscore.js and Backbone.js in the closure in order
-// to make things work even if they are removed from the global namespace
-
-// Generate four random hex digits.
-function S4() {
-   return (((1+Math.random())*0x10000)|0).toString(16).substring(1);
-};
-
-// Generate a pseudo-GUID by concatenating random hexadecimal.
-function guid() {
-   return (S4()+S4()+"-"+S4()+"-"+S4()+"-"+S4()+"-"+S4()+S4()+S4());
-};
-
-// Our Store is represented by a single JS object in *localStorage*. Create it
-// with a meaningful name, like the name you'd give a table.
-// window.Store is deprecated, use Backbone.LocalStorage instead
-var LocalStorage = langx.klass({
-  _construct : function(name) {
-    this.name = name;
-    var store = this.localStorage().getItem(this.name);
-    this.records = (store && store.split(",")) || [];
-  },
-
-  // Save the current state of the **Store** to *localStorage*.
-  save: function() {
-    this.localStorage().setItem(this.name, this.records.join(","));
-  },
-
-  // Add a model, giving it a (hopefully)-unique GUID, if it doesn't already
-  // have an id of it's own.
-  create: function(model) {
-    if (!model.id) {
-      model.id = guid();
-      model.set(model.idAttribute, model.id);
-    }
-    this.localStorage().setItem(this.name+"-"+model.id, JSON.stringify(model));
-    this.records.push(model.id.toString());
-    this.save();
-    return this.find(model);
-  },
-
-  // Update a model by replacing its copy in `this.data`.
-  update: function(model) {
-    this.localStorage().setItem(this.name+"-"+model.id, JSON.stringify(model));
-    if (!_.include(this.records, model.id.toString()))
-      this.records.push(model.id.toString()); this.save();
-    return this.find(model);
-  },
-
-  // Retrieve a model from `this.data` by id.
-  find: function(model) {
-    return this.jsonData(this.localStorage().getItem(this.name+"-"+model.id));
-  },
-
-  // Return the array of all models currently in storage.
-  findAll: function() {
-    return _(this.records).chain()
-      .map(function(id){
-        return this.jsonData(this.localStorage().getItem(this.name+"-"+id));
-      }, this)
-      .compact()
-      .value();
-  },
-
-  // Delete a model from `this.data`, returning it.
-  destroy: function(model) {
-    if (model.isNew())
-      return false
-    this.localStorage().removeItem(this.name+"-"+model.id);
-    this.records = _.reject(this.records, function(id){
-      return id === model.id.toString();
-    });
-    this.save();
-    return model;
-  },
-
-  localStorage: function() {
-    return localStorage;
-  },
-
-  // fix for "illegal access" error on Android when JSON.parse is passed null
-  jsonData: function (data) {
-      return data && JSON.parse(data);
-  }
-
-});
-
-// localSync delegate to the model or collection's
-// *localStorage* property, which should be an instance of `Store`.
-// window.Store.sync and Backbone.localSync is deprectated, use Backbone.LocalStorage.sync instead
-LocalStorage.sync = models.localSync = function(method, model, options) {
-  var store = model.localStorage || model.collection.localStorage;
-
-  var resp, errorMessage, syncDfd = $.Deferred && $.Deferred(); //If $ is having Deferred - use it.
-
-  try {
-
-    switch (method) {
-      case "read":
-        resp = model.id != undefined ? store.find(model) : store.findAll();
-        break;
-      case "create":
-        resp = store.create(model);
-        break;
-      case "update":
-        resp = store.update(model);
-        break;
-      case "delete":
-        resp = store.destroy(model);
-        break;
-    }
-
-  } catch(error) {
-    if (error.code === DOMException.QUOTA_EXCEEDED_ERR && window.localStorage.length === 0)
-      errorMessage = "Private browsing is unsupported";
-    else
-      errorMessage = error.message;
-  }
-
-  if (resp) {
-    model.trigger("sync", model, resp, options);
-    if (options && options.success)
-      options.success(resp);
-    if (syncDfd)
-      syncDfd.resolve(resp);
-
-  } else {
-    errorMessage = errorMessage ? errorMessage
-                                : "Record Not Found";
-
-    if (options && options.error)
-      options.error(errorMessage);
-    if (syncDfd)
-      syncDfd.reject(errorMessage);
-  }
-
-  // add compatibility with $.ajax
-  // always execute callback for success and error
-  if (options && options.complete) options.complete(resp);
-
-  return syncDfd && syncDfd.promise();
-};
-
-
-models.ajaxSync = models.sync;
-
-models.getSyncMethod = function(model) {
-  if(model.localStorage || (model.collection && model.collection.localStorage)) {
-    return models.localSync;
-  }
-
-  return models.ajaxSync;
-};
-
-// Override 'Backbone.sync' to default to localSync,
-// the original 'Backbone.sync' is still available in 'Backbone.ajaxSync'
-models.sync = function(method, model, options) {
-  return models.getSyncMethod(model).apply(this, [method, model, options]);
-};
-
-return Backbone.LocalStorage =  LocalStorage;
-
-});
 define('skylark-backbone/main',[
 	"./backbone",
-	"./Collection",
 	"./events",
+	"./Collection",
 	"./Model",
-	"./View",
-	"./LocalStorage"
+	"./History",
+	"./Router",
+	"./View"
 ],function(backbone){
 	return backbone;
 });

@@ -1,10 +1,11 @@
 define([
 	"./backbone",
-	"./Collection",
 	"./events",
+	"./Collection",
 	"./Model",
-	"./View",
-	"./LocalStorage"
+	"./History",
+	"./Router",
+	"./View"
 ],function(backbone){
 	return backbone;
 });

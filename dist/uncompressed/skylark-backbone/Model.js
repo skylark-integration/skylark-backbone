@@ -1,7 +1,7 @@
 define([
   "skylark-langx/langx",
   "skylark-underscore/underscore",
-  "./models",
+  "skylark-fw-model",
   "./backbone",
   "./events",
   "./helper"
@@ -34,8 +34,13 @@ define([
       // Special-cased proxy to underscore's `_.matches` method.
       matches: function(attrs) {
         return !!_.iteratee(attrs, this)(this.attributes);
+      },
+
+      // Proxy `Backbone.sync` by default.
+      sync: function() {
+        return Backbone.sync.apply(this, arguments);
       }
-  });
+ });
 
 
 

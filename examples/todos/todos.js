@@ -14,6 +14,7 @@ require.config({
       { name: "skylark-utils-dom", location: "../../node_modules/skylark-utils-dom/src" },
       { name: "skylark-underscore", location: "../../node_modules/skylark-underscore/src" },
       { name: "skylark-jquery", location: "../../node_modules/skylark-jquery/src" },
+      { name: "skylark-fw-model", location: "../../node_modules/skylark-fw-model/src" },
       { name: "skylark-backbone", location: "../../src" }
   ] , 
   "map": {
@@ -22,8 +23,26 @@ require.config({
 
 });
 
-require(["skylark-jquery","skylark-underscore","skylark-backbone"],function($,_,Backbone){
+require(["skylark-jquery","skylark-underscore","skylark-fw-model","skylark-backbone"],function($,_,models,Backbone){
 $(function(){
+
+  Backbone.ajaxSync = Backbone.sync;
+  Backbone.localSync = models.backends.localSync;
+
+  Backbone.getSyncMethod = function(model) {
+    if(model.localStorage || (model.collection && model.collection.localStorage)) {
+      return Backbone.localSync;
+    }
+
+    return Backbone.ajaxSync;
+  };
+
+  // Override 'Backbone.sync' to default to localSync,
+  // the original 'Backbone.sync' is still available in 'Backbone.ajaxSync'
+  Backbone.sync = function(method, model, options) {
+    return Backbone.getSyncMethod(model).apply(this, [method, model, options]);
+  };
+
 
   // Todo Model
   // ----------
@@ -58,7 +77,7 @@ $(function(){
     model: Todo,
 
     // Save all of the todo items under the `"todos-backbone"` namespace.
-    localStorage: new Backbone.LocalStorage("todos-backbone"),
+    localStorage: new models.backends.LocalStorage("todos-backbone"),
 
     // Filter down the list of all todo items that are finished.
     done: function() {
