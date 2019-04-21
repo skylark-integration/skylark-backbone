@@ -37,11 +37,16 @@
                 deps: deps.map(function(dep){
                   return absolute(dep,id);
                 }),
+                resolved: false,
                 exports: null
             };
             require(id);
         } else {
-            map[id] = factory;
+            map[id] = {
+                factory : null,
+                resolved : true,
+                exports : factory
+            };
         }
     };
     require = globals.require = function(id) {
@@ -49,14 +54,15 @@
             throw new Error('Module ' + id + ' has not been defined');
         }
         var module = map[id];
-        if (!module.exports) {
+        if (!module.resolved) {
             var args = [];
 
             module.deps.forEach(function(dep){
                 args.push(require(dep));
             })
 
-            module.exports = module.factory.apply(globals, args);
+            module.exports = module.factory.apply(globals, args) || null;
+            module.resolved = true;
         }
         return module.exports;
     };
@@ -91,7 +97,7 @@ define('skylark-backbone/backbone',[
 //     Backbone may be freely distributed under the MIT license.
 //     For all details and documentation:
 //     http://backbonejs.org
-	var Backbone = skylark.backbone = {
+	var Backbone  = {
         // set a `X-Http-Method-Override` header.
         emulateHTTP : false,
 
@@ -101,7 +107,7 @@ define('skylark-backbone/backbone',[
         // form param named `model`.
         emulateJSON : false,
 
-	}
+	};
     
     Backbone.$ = $;
 
@@ -115,7 +121,7 @@ define('skylark-backbone/backbone',[
 	};
 
 
-	return Backbone ;
+	return skylark.attach("itg.backbone",Backbone) ;
 });
 define('skylark-backbone/events',[
   "skylark-langx/langx",
@@ -287,6 +293,7 @@ define('skylark-backbone/Collection',[
       // initialization logic.
       initialize: function(){},
 
+      // Proxy `Backbone.sync` by default.
       sync: function() {
         return Backbone.sync.apply(this, arguments);
       }

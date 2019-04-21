@@ -33,6 +33,7 @@ define([
       // initialization logic.
       initialize: function(){},
 
+      // Proxy `Backbone.sync` by default.
       sync: function() {
         return Backbone.sync.apply(this, arguments);
       }

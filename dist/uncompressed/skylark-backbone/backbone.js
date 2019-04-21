@@ -9,7 +9,7 @@ define([
 //     Backbone may be freely distributed under the MIT license.
 //     For all details and documentation:
 //     http://backbonejs.org
-	var Backbone = skylark.backbone = {
+	var Backbone  = {
         // set a `X-Http-Method-Override` header.
         emulateHTTP : false,
 
@@ -19,7 +19,7 @@ define([
         // form param named `model`.
         emulateJSON : false,
 
-	}
+	};
     
     Backbone.$ = $;
 
@@ -33,5 +33,5 @@ define([
 	};
 
 
-	return Backbone ;
+	return skylark.attach("itg.backbone",Backbone) ;
 });

@@ -5,5 +5,5 @@
  * @link 
  * @license MIT
  */
-define(["skylark-langx/skylark","skylark-fw-model","skylark-jquery"],function(e,a,l){var n=e.backbone={emulateHTTP:!1,emulateJSON:!1};return n.$=l,n.sync=function(e,l,t){return langx.defaults(t||(t={}),{emulateHTTP:n.emulateHTTP,emulateJSON:n.emulateJSON}),a.backends.ajaxSync.apply(this,[e,l,t])},n});
+define(["skylark-langx/skylark","skylark-fw-model","skylark-jquery"],function(a,e,l){var t={emulateHTTP:!1,emulateJSON:!1};return t.$=l,t.sync=function(a,l,n){return langx.defaults(n||(n={}),{emulateHTTP:t.emulateHTTP,emulateJSON:t.emulateJSON}),e.backends.ajaxSync.apply(this,[a,l,n])},a.attach("itg.backbone",t)});
 //# sourceMappingURL=sourcemaps/backbone.js.map

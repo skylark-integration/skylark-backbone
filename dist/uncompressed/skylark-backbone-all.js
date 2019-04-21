@@ -37,11 +37,16 @@
                 deps: deps.map(function(dep){
                   return absolute(dep,id);
                 }),
+                resolved: false,
                 exports: null
             };
             require(id);
         } else {
-            map[id] = factory;
+            map[id] = {
+                factory : null,
+                resolved : true,
+                exports : factory
+            };
         }
     };
     require = globals.require = function(id) {
@@ -49,14 +54,15 @@
             throw new Error('Module ' + id + ' has not been defined');
         }
         var module = map[id];
-        if (!module.exports) {
+        if (!module.resolved) {
             var args = [];
 
             module.deps.forEach(function(dep){
                 args.push(require(dep));
             })
 
-            module.exports = module.factory.apply(globals, args);
+            module.exports = module.factory.apply(globals, args) || null;
+            module.resolved = true;
         }
         return module.exports;
     };
@@ -80,15 +86,39 @@
 
 })(function(define,require) {
 
-define('skylark-langx/skylark',[], function() {
-    var skylark = {
+define('skylark-langx/_attach',[],function(){
+    return  function attach(obj1,path,obj2) {
+        if (typeof path == "string") {
+            path = path.split(".");//[path]
+        };
+        var length = path.length,
+            ns=obj1,
+            i=0,
+            name = path[i++];
 
+        while (i < length) {
+            ns = ns[name] = ns[name] || {};
+            name = path[i++];
+        }
+
+        return ns[name] = obj2;
+    }
+});
+define('skylark-langx/skylark',[
+    "./_attach"
+], function(_attach) {
+    var skylark = {
+    	attach : function(path,obj) {
+    		return _attach(skylark,path,obj);
+    	}
     };
     return skylark;
 });
 
 define('skylark-langx/types',[
 ],function(){
+    var toString = {}.toString;
+    
     var type = (function() {
         var class2type = {};
 
@@ -290,6 +320,8 @@ define('skylark-langx/types',[
 
         isNumber: isNumber,
 
+        isNumeric: isNumber,
+
         isObject: isObject,
 
         isPlainObject: isPlainObject,
@@ -438,6 +470,12 @@ define('skylark-langx/arrays',[
       return [ obj ];             
     }
 
+
+    function forEach (arr, fn) {
+      if (arr.forEach) return arr.forEach(fn)
+      for (var i = 0; i < arr.length; i++) fn(arr[i], i);
+    }
+
     function map(elements, callback) {
         var value, values = [],
             i, key
@@ -480,6 +518,8 @@ define('skylark-langx/arrays',[
         inArray: inArray,
 
         makeArray: makeArray,
+
+        forEach : forEach,
 
         map : map,
         
@@ -633,9 +673,10 @@ define('skylark-langx/numbers',[
 	}
 });
 define('skylark-langx/objects',[
+    "./_attach",
 	"./types",
     "./numbers"
-],function(types,numbers){
+],function(_attach,types,numbers){
 	var hasOwnProperty = Object.prototype.hasOwnProperty,
         slice = Array.prototype.slice,
         isBoolean = types.isBoolean,
@@ -979,7 +1020,7 @@ define('skylark-langx/objects',[
 
     function result(obj, path, fallback) {
         if (!isArray(path)) {
-            path = [path]
+            path = path.split(".");//[path]
         };
         var length = path.length;
         if (!length) {
@@ -1017,8 +1058,6 @@ define('skylark-langx/objects',[
         return values;
     }
 
-
-    
     function clone( /*anything*/ src,checkCloneMethod) {
         var copy;
         if (src === undefined || src === null) {
@@ -1045,6 +1084,8 @@ define('skylark-langx/objects',[
 
     return {
         allKeys: allKeys,
+
+        attach : _attach,
 
         clone: clone,
 
@@ -1864,6 +1905,69 @@ define('skylark-langx/funcs',[
         };
     })();
 
+  var templateSettings = {
+    evaluate: /<%([\s\S]+?)%>/g,
+    interpolate: /<%=([\s\S]+?)%>/g,
+    escape: /<%-([\s\S]+?)%>/g
+  };
+
+
+  function template(text, settings, oldSettings) {
+    if (!settings && oldSettings) settings = oldSettings;
+    settings = objects.defaults({}, settings,templateSettings);
+
+    // Combine delimiters into one regular expression via alternation.
+    var matcher = RegExp([
+      (settings.escape || noMatch).source,
+      (settings.interpolate || noMatch).source,
+      (settings.evaluate || noMatch).source
+    ].join('|') + '|$', 'g');
+
+    // Compile the template source, escaping string literals appropriately.
+    var index = 0;
+    var source = "__p+='";
+    text.replace(matcher, function(match, escape, interpolate, evaluate, offset) {
+      source += text.slice(index, offset).replace(escapeRegExp, escapeChar);
+      index = offset + match.length;
+
+      if (escape) {
+        source += "'+\n((__t=(" + escape + "))==null?'':_.escape(__t))+\n'";
+      } else if (interpolate) {
+        source += "'+\n((__t=(" + interpolate + "))==null?'':__t)+\n'";
+      } else if (evaluate) {
+        source += "';\n" + evaluate + "\n__p+='";
+      }
+
+      // Adobe VMs need the match returned to produce the correct offset.
+      return match;
+    });
+    source += "';\n";
+
+    // If a variable is not specified, place data values in local scope.
+    if (!settings.variable) source = 'with(obj||{}){\n' + source + '}\n';
+
+    source = "var __t,__p='',__j=Array.prototype.join," +
+      "print=function(){__p+=__j.call(arguments,'');};\n" +
+      source + 'return __p;\n';
+
+    var render;
+    try {
+      render = new Function(settings.variable || 'obj', '_', source);
+    } catch (e) {
+      e.source = source;
+      throw e;
+    }
+
+    var template = function(data) {
+      return render.call(this, data, _);
+    };
+
+    // Provide the compiled source as a convenience for precompilation.
+    var argument = settings.variable || 'obj';
+    template.source = 'function(' + argument + '){\n' + source + '}';
+
+    return template;
+  };
 
     return {
         debounce: debounce,
@@ -1882,7 +1986,10 @@ define('skylark-langx/funcs',[
 
         returnFalse: function() {
             return false;
-        }
+        },
+
+        templateSettings : templateSettings,
+        template : template
     };
 });
 define('skylark-langx/Deferred',[
@@ -1892,7 +1999,8 @@ define('skylark-langx/Deferred',[
 ],function(arrays,funcs,objects){
     "use strict";
     
-    var  PGLISTENERS = Symbol ? Symbol() : '__pglisteners';
+    var  PGLISTENERS = Symbol ? Symbol() : '__pglisteners',
+         PGNOTIFIES = Symbol ? Symbol() : '__pgnotifies';
 
     var slice = Array.prototype.slice,
         proxy = funcs.proxy,
@@ -1907,8 +2015,10 @@ define('skylark-langx/Deferred',[
             this.then(handler,handler);
             return this;
         },
-        done : function(handler) {
-            this.then(handler);
+        done : function() {
+            for (var i = 0;i<arguments.length;i++) {
+                this.then(arguments[i]);
+            }
             return this;
         },
         fail : function(handler) { 
@@ -1916,7 +2026,7 @@ define('skylark-langx/Deferred',[
             //return this.then(null,handler);
             this.catch(handler);
             return this;
-        }
+         }
     });
 
 
@@ -1930,6 +2040,7 @@ define('skylark-langx/Deferred',[
         wrapPromise(p,self);
 
         this[PGLISTENERS] = [];
+        this[PGNOTIFIES] = [];
 
         //this.resolve = Deferred.prototype.resolve.bind(this);
         //this.reject = Deferred.prototype.reject.bind(this);
@@ -1952,7 +2063,7 @@ define('skylark-langx/Deferred',[
                     if (onProgress) {
                         this.progress(onProgress);
                     }
-                    return mixin(Promise.prototype.then.call(this,
+                    return wrapPromise(Promise.prototype.then.call(this,
                             onResolved && function(args) {
                                 if (args && args.__ctx__ !== undefined) {
                                     return onResolved.apply(args.__ctx__,args);
@@ -1966,9 +2077,12 @@ define('skylark-langx/Deferred',[
                                 } else {
                                     return onRejected(args);
                                 }
-                            }),added);
+                            }));
                 },
                 progress : function(handler) {
+                    d[PGNOTIFIES].forEach(function (value) {
+                        handler(value);
+                    });
                     d[PGLISTENERS].push(handler);
                     return this;
                 }
@@ -1993,11 +2107,13 @@ define('skylark-langx/Deferred',[
         return this;
     };
 
-    Deferred.prototype.progress = function(value) {
+    Deferred.prototype.notify = function(value) {
         try {
-          return this[PGLISTENERS].forEach(function (listener) {
-            return listener(value);
-          });
+            this[PGNOTIFIES].push(value);
+
+            return this[PGLISTENERS].forEach(function (listener) {
+                return listener(value);
+            });
         } catch (error) {
           this.reject(error);
         }
@@ -2030,10 +2146,33 @@ define('skylark-langx/Deferred',[
         return p.then(callback, errback, progback);
     };
 
-    Deferred.prototype.done  = Deferred.prototype.then;
+    Deferred.prototype.progress = function(progback){
+        var p = result(this,"promise");
+        return p.progress(progback);
+    };
+   
+    Deferred.prototype.catch = function(errback) {
+        var p = result(this,"promise");
+        return p.catch(errback);
+    };
+
+
+    Deferred.prototype.done  = function() {
+        var p = result(this,"promise");
+        return p.done.apply(p,arguments);
+    };
+
+    Deferred.prototype.fail = function(errback) {
+        var p = result(this,"promise");
+        return p.fail(errback);
+    };
+
 
     Deferred.all = function(array) {
-        return wrapPromise(Promise.all(array));
+        //return wrapPromise(Promise.all(array));
+        var d = new Deferred();
+        Promise.all(array).then(d.resolve.bind(d),d.reject.bind(d));
+        return result(d,"promise");
     };
 
     Deferred.first = function(array) {
@@ -2053,7 +2192,7 @@ define('skylark-langx/Deferred',[
             }
         } else if (!nativePromise) {
             var deferred = new Deferred(valueOrPromise.cancel);
-            valueOrPromise.then(proxy(deferred.resolve,deferred), proxy(deferred.reject,deferred), deferred.progress);
+            valueOrPromise.then(proxy(deferred.resolve,deferred), proxy(deferred.reject,deferred), deferred.notify);
             valueOrPromise = deferred.promise;
         }
 
@@ -2081,9 +2220,9 @@ define('skylark-langx/Deferred',[
 });
 define('skylark-langx/async',[
     "./Deferred",
-    "./arrays"
-],function(Deferred,arrays){
-    var each = arrays.each;
+    "./objects"
+],function(Deferred,objects){
+    var each = objects.each;
     
     var async = {
         parallel : function(arr,args,ctx) {
@@ -2444,6 +2583,86 @@ define('skylark-langx/Evented',[
 	return Evented;
 
 });
+define('skylark-langx/hoster',[
+],function(){
+	// The javascript host environment, brower and nodejs are supported.
+	var hoster = {
+		"isBrowser" : true, // default
+		"isNode" : null,
+		"global" : this,
+		"browser" : null,
+		"node" : null
+	};
+
+	if (typeof process == "object" && process.versions && process.versions.node && process.versions.v8) {
+		hoster.isNode = true;
+		hoster.isBrowser = false;
+	}
+
+	hoster.global = (function(){
+		if (typeof global !== 'undefined' && typeof global !== 'function') {
+			// global spec defines a reference to the global object called 'global'
+			// https://github.com/tc39/proposal-global
+			// `global` is also defined in NodeJS
+			return global;
+		} else if (typeof window !== 'undefined') {
+			// window is defined in browsers
+			return window;
+		}
+		else if (typeof self !== 'undefined') {
+			// self is defined in WebWorkers
+			return self;
+		}
+		return this;
+	})();
+
+	var _document = null;
+
+	Object.defineProperty(hoster,"document",function(){
+		if (!_document) {
+			var w = typeof window === 'undefined' ? require('html-element') : window;
+			_document = w.document;
+		}
+
+		return _document;
+	});
+
+	if (hoster.isBrowser) {
+	    function uaMatch( ua ) {
+		    ua = ua.toLowerCase();
+
+		    var match = /(chrome)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(webkit)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(opera)(?:.*version|)[ \/]([\w.]+)/.exec( ua ) ||
+		      /(msie) ([\w.]+)/.exec( ua ) ||
+		      ua.indexOf('compatible') < 0 && /(mozilla)(?:.*? rv:([\w.]+)|)/.exec( ua ) ||
+		      [];
+
+		    return {
+		      browser: match[ 1 ] || '',
+		      version: match[ 2 ] || '0'
+		    };
+	  	};
+
+	    var matched = uaMatch( navigator.userAgent );
+
+	    var browser = hoster.browser = {};
+
+	    if ( matched.browser ) {
+	      browser[ matched.browser ] = true;
+	      browser.version = matched.version;
+	    }
+
+	    // Chrome is Webkit, but Webkit is also Safari.
+	    if ( browser.chrome ) {
+	      browser.webkit = true;
+	    } else if ( browser.webkit ) {
+	      browser.safari = true;
+	    }
+	}
+
+	return  hoster;
+});
 define('skylark-langx/strings',[
 ],function(){
 
@@ -2578,7 +2797,7 @@ define('skylark-langx/Xhr',[
     "./funcs",
     "./types"
 ],function(arrays,Deferred,Evented,objects,funcs,types){
-    var each = arrays.each,
+    var each = objects.each,
         mixin = objects.mixin,
         noop = funcs.noop,
         isArray = types.isArray,
@@ -2809,7 +3028,7 @@ define('skylark-langx/Xhr',[
 
                 var onprogress = function(evt) {
                     if (deferred) {
-                        deferred.progress(evt,xhr.status,xhr);
+                        deferred.notify(evt,xhr.status,xhr);
                     }
                 }
 
@@ -3260,6 +3479,36 @@ define('skylark-langx/Stateful',[
 
 	return Stateful;
 });
+define('skylark-langx/topic',[
+	"./Evented"
+],function(Evented){
+	var hub = new Evented();
+
+	return {
+	    publish: function(name, arg1,argn) {
+	        var data = [].slice.call(arguments, 1);
+
+	        return hub.trigger({
+	            type : name,
+	            data : data
+	        });
+	    },
+
+        subscribe: function(name, listener,ctx) {
+        	var handler = function(e){
+                listener.apply(ctx,e.data);
+            };
+            hub.on(name, handler);
+            return {
+            	remove : function(){
+            		hub.off(name,handler);
+            	}
+            }
+
+        }
+
+	}
+});
 define('skylark-langx/langx',[
     "./skylark",
     "./arrays",
@@ -3270,15 +3519,17 @@ define('skylark-langx/langx',[
     "./Deferred",
     "./Evented",
     "./funcs",
+    "./hoster",
     "./klass",
     "./numbers",
     "./objects",
     "./Restful",
     "./Stateful",
     "./strings",
+    "./topic",
     "./types",
     "./Xhr"
-], function(skylark,arrays,ArrayStore,aspect,async,datetimes,Deferred,Evented,funcs,klass,numbers,objects,Restful,Stateful,strings,types,Xhr) {
+], function(skylark,arrays,ArrayStore,aspect,async,datetimes,Deferred,Evented,funcs,hoster,klass,numbers,objects,Restful,Stateful,strings,topic,types,Xhr) {
     "use strict";
     var toString = {}.toString,
         concat = Array.prototype.concat,
@@ -3358,11 +3609,15 @@ define('skylark-langx/langx',[
 
         Evented: Evented,
 
+        hoster : hoster,
+
         klass : klass,
 
         Restful: Restful,
         
         Stateful: Stateful,
+
+        topic : topic,
 
         Xhr: Xhr
 
@@ -4324,6 +4579,8 @@ define('skylark-utils-dom/browser',[
     "./langx"
 ], function(dom,langx) {
     "use strict";
+
+    var browser = langx.hoster.browser;
  
     var checkedCssProperties = {
             "transitionproperty": "TransitionProperty",
@@ -4406,10 +4663,6 @@ define('skylark-utils-dom/browser',[
 
     function normalizeStyleProperty(name) {
         return cssStyles[name] || name;
-    }
-
-    function browser() {
-        return browser;
     }
 
     langx.mixin(browser, {
@@ -4512,7 +4765,7 @@ define('skylark-utils-dom/styler',[
         if (!elementDisplay[nodeName]) {
             element = document.createElement(nodeName)
             document.body.appendChild(element)
-            display = getComputedStyle(element, '').getPropertyValue("display")
+            display = getStyles(element).getPropertyValue("display")
             element.parentNode.removeChild(element)
             display == "none" && (display = "block")
             elementDisplay[nodeName] = display
@@ -4569,6 +4822,22 @@ define('skylark-utils-dom/styler',[
 
         return this;
     }
+
+    function getStyles( elem ) {
+
+        // Support: IE <=11 only, Firefox <=30 (#15098, #14150)
+        // IE throws on elements created in popups
+        // FF meanwhile throws on frame elements through "defaultView.getComputedStyle"
+        var view = elem.ownerDocument.defaultView;
+
+        if ( !view || !view.opener ) {
+            view = window;
+        }
+
+        return view.getComputedStyle( elem);
+    }
+
+
     /*
      * Get the value of a computed style property for the first element in the set of matched elements or set one or more CSS properties for every matched element.
      * @param {HTMLElement} elm
@@ -4578,7 +4847,7 @@ define('skylark-utils-dom/styler',[
     function css(elm, property, value) {
         if (arguments.length < 3) {
             var computedStyle,
-                computedStyle = getComputedStyle(elm, '')
+                computedStyle = getStyles(elm)
             if (langx.isString(property)) {
                 return elm.style[camelCase(property)] || computedStyle.getPropertyValue(dasherize(property))
             } else if (langx.isArrayLike(property)) {
@@ -5047,14 +5316,20 @@ define('skylark-utils-dom/noder',[
     }
 
     /*   
-     * Check to see if a dom node is a descendant of another dom node.
+     * Check to see if a dom node is a document.
      * @param {Node} node
-     * @param {Node} parent
-     * @param {Node} directly
      */
-    function isDoc(node) {
+    function isDocument(node) {
         return node != null && node.nodeType == node.DOCUMENT_NODE
     }
+
+    /*   
+     * Check to see if a dom node is in the document
+     * @param {Node} node
+     */
+    function isInDocument(node) {
+      return (node === document.body) ? true : document.body.contains(node);
+    }        
 
     /*   
      * Get the owner document object for the specified element.
@@ -5349,7 +5624,9 @@ define('skylark-utils-dom/noder',[
 
         isChildOf: isChildOf,
 
-        isDoc: isDoc,
+        isDocument: isDocument,
+
+        isInDocument: isInDocument,
 
         isWindow: langx.isWindow,
 
@@ -6654,13 +6931,17 @@ define('skylark-utils-dom/datax',[
      * @param {Array} names
      */
     function removeData(elm, names) {
-        if (langx.isString(names)) {
-            names = names.split(/\s+/);
+        if (names) {
+            if (langx.isString(names)) {
+                names = names.split(/\s+/);
+            }
+            var store = _store(elm, true);
+            names.forEach(function(name) {
+                delete store[name];
+            });            
+        } else {
+            cleanData(elm);
         }
-        var store = _store(elm, true);
-        names.forEach(function(name) {
-            delete store[name];
-        });
         return this;
     }
 
@@ -9303,7 +9584,7 @@ define('skylark-utils-dom/query',[
                         nodes = finder.descendants(context, selector);
                     }
                 } else {
-                    if (isArray(selector)) {
+                    if (selector !== window && isArrayLike(selector)) {
                         // a dom node array is expected
                         nodes = selector;
                     } else {
@@ -10042,6 +10323,8 @@ define('skylark-jquery/core',[
     (function($){
 	    $.fn.jquery = '2.2.0';
 
+	    $.browser = browser;
+	    
 	    $.camelCase = langx.camelCase;
 
 		$.cleanData = function( elems ) {
@@ -10222,6 +10505,50 @@ define('skylark-jquery/core',[
 
         };
 
+        $.speed = function( speed, easing, fn ) {
+            var opt = speed && typeof speed === "object" ? $.extend( {}, speed ) : {
+                complete: fn || !fn && easing ||
+                    $.isFunction( speed ) && speed,
+                duration: speed,
+                easing: fn && easing || easing && !$.isFunction( easing ) && easing
+            };
+
+            // Go to the end state if fx are off
+            if ( $.fx.off ) {
+                opt.duration = 0;
+
+            } else {
+                if ( typeof opt.duration !== "number" ) {
+                    if ( opt.duration in $.fx.speeds ) {
+                        opt.duration = $.fx.speeds[ opt.duration ];
+
+                    } else {
+                        opt.duration = $.fx.speeds._default;
+                    }
+                }
+            }
+
+            // Normalize opt.queue - true/undefined/null -> "fx"
+            if ( opt.queue == null || opt.queue === true ) {
+                opt.queue = "fx";
+            }
+
+            // Queueing
+            opt.old = opt.complete;
+
+            opt.complete = function() {
+                if ( $.isFunction( opt.old ) ) {
+                    opt.old.call( this );
+                }
+
+                if ( opt.queue ) {
+                    $.dequeue( this, opt.queue );
+                }
+            };
+
+            return opt;
+        };
+
         $.easing = {};
 
 	    $.offset = {};
@@ -10277,6 +10604,15 @@ define('skylark-jquery/core',[
                 return {};
             }
         };
+
+     	var t = $.fn.text;  
+	    $.fn.text = function(v) {
+	        var r = t.apply(this,arguments);
+	        if (r === undefined) {
+	            r = "";
+	        }  
+	        return r;
+	    };       
         	    
     })(query);
 
@@ -10296,6 +10632,21 @@ define('skylark-jquery/ajax',[
     "skylark-langx/langx"
 ], function($,langx) {
     var jsonpID = 0;
+
+     // Attach a bunch of functions for handling common AJAX events
+    $.each( [
+        "ajaxStart",
+        "ajaxStop",
+        "ajaxComplete",
+        "ajaxError",
+        "ajaxSuccess",
+        "ajaxSend"
+    ], function( i, type ) {
+        $.fn[ type ] = function( fn ) {
+            return this.on( type, fn );
+        };
+    } );
+   
 
     function appendQuery(url, query) {
         if (query == '') return url
@@ -10379,10 +10730,26 @@ define('skylark-jquery/ajax',[
             return $.ajaxJSONP(options);
         }
 
-        var p = langx.Xhr.request(options.url,options);
-        if (options.success) {
-            p = p.then(options.success,options.error);
+        function ajaxSuccess() {
+            $(document).trigger("ajaxSucess");
+            if (options.success) {
+                options.success.apply(this,arguments);
+            }
         }
+
+        function ajaxError() {
+            $(document).trigger("ajaxError");
+            if (options.error) {
+                options.error.apply(this,arguments);
+            }
+        }
+
+        var p = langx.Xhr.request(options.url,options);
+        p = p.then(ajaxSuccess,ajaxError);
+        p.success = p.done;
+        p.error = p.fail;
+        p.complete = p.always;
+        
         return p;
     };
 
@@ -10627,21 +10994,33 @@ define('skylark-jquery/deferred',[
 
     $.Deferred = function() {
         var d = new langx.Deferred(),
-            _p = d.promise;
-        d.promise = function() {
-            return _p;
-        }
-        return d;
-    };
+            ret = {
+                promise : function() {
+                    return d.promise;
+                }
+            };
 
+        ["resolve","resolveWith","reject","rejectWith","notify","then","done","fail","progress"].forEach(function(name){
+            ret[name] = function() {
+              var ret2 =   d[name].apply(d,arguments);
+              if (ret2 == d) {
+                ret2 = ret;
+              }
+              return ret2;
+            }
+        });
+
+        return ret;
+    };
+    
     $.when = function(){
         var p = langx.Deferred.all(langx.makeArray(arguments)),
             originThen = p.then;
         p.then = function(onResolved,onRejected) {
             var handler = function(results) {
-                results = results.map(function(result){
-                    return [result];
-                });
+                //results = results.map(function(result){
+                //    return [result];
+                //});
                 return onResolved && onResolved.apply(null,results);
             };
             return originThen.call(p,handler,onRejected);
@@ -11068,12 +11447,1322 @@ define('skylark-jquery/queue',[
 
 });
 
+define('skylark-utils-dom/elmx',[
+    "./dom",
+    "./langx",
+    "./datax",
+    "./eventer",
+    "./finder",
+    "./fx",
+    "./geom",
+    "./noder",
+    "./styler",
+    "./query"
+], function(dom, langx, datax, eventer, finder, fx, geom, noder, styler,$) {
+    var map = Array.prototype.map,
+        slice = Array.prototype.slice;
+    /*
+     * VisualElement is a skylark class type wrapping a visule dom node,
+     * provides a number of prototype methods and supports chain calls.
+     */
+    var VisualElement = langx.klass({
+        klassName: "VisualElement",
+
+        "_construct": function(node) {
+            if (langx.isString(node)) {
+                if (node.charAt(0) === "<") {
+                    //html
+                    node = noder.createFragment(node)[0];
+                } else {
+                    // id
+                    node = document.getElementById(node);
+                }
+            }
+            this._elm = node;
+        }
+    });
+
+    VisualElement.prototype.$ = VisualElement.prototype.query = function(selector) {
+        return $(selector,this._elm);
+    };
+
+    VisualElement.prototype.elm = function() {
+        return this._elm;
+    };
+
+    /*
+     * the VisualElement object wrapping document.body
+     */
+    var root = new VisualElement(document.body),
+        elmx = function(node) {
+            if (node) {
+                return new VisualElement(node);
+            } else {
+                return root;
+            }
+        };
+    /*
+     * Extend VisualElement prototype with wrapping the specified methods.
+     * @param {ArrayLike} fn
+     * @param {Object} context
+     */
+    function _delegator(fn, context) {
+        return function() {
+            var self = this,
+                elem = self._elm,
+                ret = fn.apply(context, [elem].concat(slice.call(arguments)));
+
+            if (ret) {
+                if (ret === context) {
+                    return self;
+                } else {
+                    if (ret instanceof HTMLElement) {
+                        ret = new VisualElement(ret);
+                    } else if (langx.isArrayLike(ret)) {
+                        ret = map.call(ret, function(el) {
+                            if (el instanceof HTMLElement) {
+                                return new VisualElement(el);
+                            } else {
+                                return el;
+                            }
+                        })
+                    }
+                }
+            }
+            return ret;
+        };
+    }
+
+    langx.mixin(elmx, {
+        batch: function(nodes, action, args) {
+            nodes.forEach(function(node) {
+                var elm = (node instanceof VisualElement) ? node : elmx(node);
+                elm[action].apply(elm, args);
+            });
+
+            return this;
+        },
+
+        root: new VisualElement(document.body),
+
+        VisualElement: VisualElement,
+
+        partial: function(name, fn) {
+            var props = {};
+
+            props[name] = fn;
+
+            VisualElement.partial(props);
+        },
+
+        delegate: function(names, context) {
+            var props = {};
+
+            names.forEach(function(name) {
+                props[name] = _delegator(context[name], context);
+            });
+
+            VisualElement.partial(props);
+        }
+    });
+
+    // from ./datax
+    elmx.delegate([
+        "attr",
+        "data",
+        "prop",
+        "removeAttr",
+        "removeData",
+        "text",
+        "val"
+    ], datax);
+
+    // from ./eventer
+    elmx.delegate([
+        "off",
+        "on",
+        "one",
+        "shortcuts",
+        "trigger"
+    ], eventer);
+
+    // from ./finder
+    elmx.delegate([
+        "ancestor",
+        "ancestors",
+        "children",
+        "descendant",
+        "find",
+        "findAll",
+        "firstChild",
+        "lastChild",
+        "matches",
+        "nextSibling",
+        "nextSiblings",
+        "parent",
+        "previousSibling",
+        "previousSiblings",
+        "siblings"
+    ], finder);
+
+    /*
+     * find a dom element matched by the specified selector.
+     * @param {String} selector
+     */
+    elmx.find = function(selector) {
+        if (selector === "body") {
+            return this.root;
+        } else {
+            return this.root.descendant(selector);
+        }
+    };
+
+    // from ./fx
+    elmx.delegate([
+        "animate",
+        "fadeIn",
+        "fadeOut",
+        "fadeTo",
+        "fadeToggle",
+        "hide",
+        "scrollToTop",
+        "show",
+        "toggle"
+    ], fx);
+
+
+    // from ./geom
+    elmx.delegate([
+        "borderExtents",
+        "boundingPosition",
+        "boundingRect",
+        "clientHeight",
+        "clientSize",
+        "clientWidth",
+        "contentRect",
+        "height",
+        "marginExtents",
+        "offsetParent",
+        "paddingExtents",
+        "pagePosition",
+        "pageRect",
+        "relativePosition",
+        "relativeRect",
+        "scrollIntoView",
+        "scrollLeft",
+        "scrollTop",
+        "size",
+        "width"
+    ], geom);
+
+    // from ./noder
+    elmx.delegate([
+        "after",
+        "append",
+        "before",
+        "clone",
+        "contains",
+        "contents",
+        "empty",
+        "html",
+        "isChildOf",
+        "isDocument",
+        "isInDocument",
+        "isWindow",
+        "ownerDoc",
+        "prepend",
+        "remove",
+        "removeChild",
+        "replace",
+        "reverse",
+        "throb",
+        "traverse",
+        "wrapper",
+        "wrapperInner",
+        "unwrap"
+    ], noder);
+
+    // from ./styler
+    elmx.delegate([
+        "addClass",
+        "className",
+        "css",
+        "hasClass",
+        "hide",
+        "isInvisible",
+        "removeClass",
+        "show",
+        "toggleClass"
+    ], styler);
+
+    // properties
+
+    var properties = [ 'position', 'left', 'top', 'right', 'bottom', 'width', 'height', 'border', 'borderLeft',
+    'borderTop', 'borderRight', 'borderBottom', 'borderColor', 'display', 'overflow', 'margin', 'marginLeft', 'marginTop', 'marginRight', 'marginBottom', 'padding', 'paddingLeft', 'paddingTop', 'paddingRight', 'paddingBottom', 'color',
+    'background', 'backgroundColor', 'opacity', 'fontSize', 'fontWeight', 'textAlign', 'textDecoration', 'textTransform', 'cursor', 'zIndex' ];
+
+    properties.forEach( function ( property ) {
+
+        var method = property;
+
+        VisualElement.prototype[method ] = function (value) {
+
+            this.css( property, value );
+
+            return this;
+
+        };
+
+    });
+
+    // events
+    var events = [ 'keyUp', 'keyDown', 'mouseOver', 'mouseOut', 'click', 'dblClick', 'change' ];
+
+    events.forEach( function ( event ) {
+
+        var method = event;
+
+        VisualElement.prototype[method ] = function ( callback ) {
+
+            this.on( event.toLowerCase(), callback);
+
+            return this;
+        };
+
+    });
+
+
+    return dom.elmx = elmx;
+});
+define('skylark-utils-dom/plugins',[
+    "./dom",
+    "./langx",
+    "./noder",
+    "./datax",
+    "./eventer",
+    "./finder",
+    "./geom",
+    "./styler",
+    "./fx",
+    "./query",
+    "./elmx"
+], function(dom, langx, noder, datax, eventer, finder, geom, styler, fx, $, elmx) {
+    "use strict";
+
+    var slice = Array.prototype.slice,
+        concat = Array.prototype.concat,
+        pluginKlasses = {},
+        shortcuts = {};
+
+    /*
+     * Create or get or destory a plugin instance assocated with the element.
+     */
+    function instantiate(elm,pluginName,options) {
+        var pair = pluginName.split(":"),
+            instanceDataName = pair[1];
+        pluginName = pair[0];
+
+        if (!instanceDataName) {
+            instanceDataName = pluginName;
+        }
+
+        var pluginInstance = datax.data( elm, instanceDataName );
+
+        if (options === "instance") {
+            return pluginInstance;
+        } else if (options === "destroy") {
+            if (!pluginInstance) {
+                throw new Error ("The plugin instance is not existed");
+            }
+            pluginInstance.destroy();
+            datax.removeData( elm, pluginName);
+            pluginInstance = undefined;
+        } else {
+            if (!pluginInstance) {
+                if (options !== undefined && typeof options !== "object") {
+                    throw new Error ("The options must be a plain object");
+                }
+                var pluginKlass = pluginKlasses[pluginName]; 
+                pluginInstance = new pluginKlass(elm,options);
+                datax.data( elm, instanceDataName,pluginInstance );
+            } else if (options) {
+                pluginInstance.reset(options);
+            }
+        }
+
+        return pluginInstance;
+    }
+
+    function shortcutter(pluginName,extfn) {
+       /*
+        * Create or get or destory a plugin instance assocated with the element,
+        * and also you can execute the plugin method directory;
+        */
+        return function (elm,options) {
+            var  plugin = instantiate(elm, pluginName,"instance");
+            if ( options === "instance" ) {
+              return plugin || null;
+            }
+            if (!plugin) {
+                plugin = instantiate(elm, pluginName,typeof options == 'object' && options || {});
+            }
+
+            if (options) {
+                var args = slice.call(arguments,2);
+                if (extfn) {
+                    return extfn.apply(plugin,args);
+                } else {
+                    if (typeof options == 'string') {
+                        var methodName = options;
+
+                        if ( !plugin ) {
+                            throw new Error( "cannot call methods on " + pluginName +
+                                " prior to initialization; " +
+                                "attempted to call method '" + methodName + "'" );
+                        }
+
+                        if ( !langx.isFunction( plugin[ methodName ] ) || methodName.charAt( 0 ) === "_" ) {
+                            throw new Error( "no such method '" + methodName + "' for " + pluginName +
+                                " plugin instance" );
+                        }
+
+                        return plugin[methodName].apply(plugin,args);
+                    }                
+                }                
+            }
+
+        }
+
+    }
+
+    /*
+     * Register a plugin type
+     */
+    function register( pluginKlass,shortcutName,instanceDataName,extfn) {
+        var pluginName = pluginKlass.prototype.pluginName;
+        
+        pluginKlasses[pluginName] = pluginKlass;
+
+        if (shortcutName) {
+            if (instanceDataName && langx.isFunction(instanceDataName)) {
+                extfn = instanceDataName;
+                instanceDataName = null;
+            } 
+            if (instanceDataName) {
+                pluginName = pluginName + ":" + instanceDataName;
+            }
+
+            var shortcut = shortcuts[shortcutName] = shortcutter(pluginName,extfn);
+                
+            $.fn[shortcutName] = function(options) {
+                var returnValue = this;
+
+                if ( !this.length && options === "instance" ) {
+                  returnValue = undefined;
+                } else {
+                  var args = slice.call(arguments);
+                  this.each(function () {
+                    var args2 = slice.call(args);
+                    args2.unshift(this);
+                    var  ret  = shortcut.apply(null,args2);
+                    if (ret !== undefined) {
+                        returnValue = ret;
+                        return false;
+                    }
+                  });
+                }
+
+                return returnValue;
+            };
+
+            elmx.partial(shortcutName,function(options) {
+                var  ret  = shortcut(this._elm,options);
+                if (ret === undefined) {
+                    ret = this;
+                }
+                return ret;
+            });
+
+        }
+    }
+
+ 
+    var Plugin =   langx.Evented.inherit({
+        klassName: "Plugin",
+
+        _construct : function(elm,options) {
+           this._elm = elm;
+           this._initOptions(options);
+        },
+
+        _initOptions : function(options) {
+          var ctor = this.constructor,
+              cache = ctor.cache = ctor.cache || {},
+              defaults = cache.defaults;
+          if (!defaults) {
+            var  ctors = [];
+            do {
+              ctors.unshift(ctor);
+              if (ctor === Plugin) {
+                break;
+              }
+              ctor = ctor.superclass;
+            } while (ctor);
+
+            defaults = cache.defaults = {};
+            for (var i=0;i<ctors.length;i++) {
+              ctor = ctors[i];
+              if (ctor.prototype.hasOwnProperty("options")) {
+                langx.mixin(defaults,ctor.prototype.options);
+              }
+              if (ctor.hasOwnProperty("options")) {
+                langx.mixin(defaults,ctor.options);
+              }
+            }
+          }
+          Object.defineProperty(this,"options",{
+            value :langx.mixin({},defaults,options)
+          });
+
+          //return this.options = langx.mixin({},defaults,options);
+          return this.options;
+        },
+
+
+        destroy: function() {
+            var that = this;
+
+            this._destroy();
+            // We can probably remove the unbind calls in 2.0
+            // all event bindings should go through this._on()
+            datax.removeData(this._elm,this.pluginName );
+        },
+
+        _destroy: langx.noop,
+
+        _delay: function( handler, delay ) {
+            function handlerProxy() {
+                return ( typeof handler === "string" ? instance[ handler ] : handler )
+                    .apply( instance, arguments );
+            }
+            var instance = this;
+            return setTimeout( handlerProxy, delay || 0 );
+        },
+
+        option: function( key, value ) {
+            var options = key;
+            var parts;
+            var curOption;
+            var i;
+
+            if ( arguments.length === 0 ) {
+
+                // Don't return a reference to the internal hash
+                return langx.mixin( {}, this.options );
+            }
+
+            if ( typeof key === "string" ) {
+
+                // Handle nested keys, e.g., "foo.bar" => { foo: { bar: ___ } }
+                options = {};
+                parts = key.split( "." );
+                key = parts.shift();
+                if ( parts.length ) {
+                    curOption = options[ key ] = langx.mixin( {}, this.options[ key ] );
+                    for ( i = 0; i < parts.length - 1; i++ ) {
+                        curOption[ parts[ i ] ] = curOption[ parts[ i ] ] || {};
+                        curOption = curOption[ parts[ i ] ];
+                    }
+                    key = parts.pop();
+                    if ( arguments.length === 1 ) {
+                        return curOption[ key ] === undefined ? null : curOption[ key ];
+                    }
+                    curOption[ key ] = value;
+                } else {
+                    if ( arguments.length === 1 ) {
+                        return this.options[ key ] === undefined ? null : this.options[ key ];
+                    }
+                    options[ key ] = value;
+                }
+            }
+
+            this._setOptions( options );
+
+            return this;
+        },
+
+        _setOptions: function( options ) {
+            var key;
+
+            for ( key in options ) {
+                this._setOption( key, options[ key ] );
+            }
+
+            return this;
+        },
+
+        _setOption: function( key, value ) {
+
+            this.options[ key ] = value;
+
+            return this;
+        },
+
+        elm : function() {
+            return this._elm;
+        }
+
+    });
+
+    $.fn.plugin = function(name,options) {
+        var args = slice.call( arguments, 1 ),
+            self = this,
+            returnValue = this;
+
+        this.each(function(){
+            returnValue = instantiate.apply(self,[this,name].concat(args));
+        });
+        return returnValue;
+    };
+
+    elmx.partial("plugin",function(name,options) {
+        var args = slice.call( arguments, 1 );
+        return instantiate.apply(this,[this.domNode,name].concat(args));
+    }); 
+
+
+    function plugins() {
+        return plugins;
+    }
+     
+    langx.mixin(plugins, {
+        instantiate,
+        Plugin,
+        register,
+        shortcuts
+    });
+
+    return plugins;
+});
+define('skylark-jquery/JqueryPlugin',[
+	"skylark-langx/types",
+	"skylark-langx/objects",
+	"skylark-langx/arrays",
+	"skylark-langx/langx",
+	"skylark-utils-dom/datax",
+	"skylark-utils-dom/eventer",
+	"skylark-utils-dom/plugins",
+	"skylark-utils-dom/query",
+],function(types, objects, arrays, langx, datax, eventer, plugins, $){
+
+    var pluginUuid = 0;
+
+	var JqPlugin = plugins.Plugin.inherit({
+		klassName : "JqPlugin",
+
+        pluginEventPrefix: "",
+
+        options: {
+            // Callbacks
+            create: null
+        },
+
+        destroy: function() {
+            this.overrided();
+
+            // We can probably remove the unbind calls in 2.0
+            // all event bindings should go through this._on()
+            this.element
+                .off( this.eventNamespace );
+
+            // Clean up events and states
+            this.bindings.off( this.eventNamespace );
+        },
+
+        _construct : function(element,options) {
+            //this.options = langx.mixin( {}, this.options );
+
+            element = $( element || this.defaultElement || this )[ 0 ];
+
+            this.overrided(element,options);
+            
+            this.element = $( element );
+            this.uuid = pluginUuid++;
+            this.eventNamespace = "." + this.pluginName + this.uuid;
+
+            this.bindings = $();
+            this.classesElementLookup = {};
+
+			this.hoverable = $();
+			this.focusable = $();
+
+            if ( element !== this ) {
+                datax.data( element, this.pluginName, this );
+                this._on( true, this.element, {
+                    remove: function( event ) {
+                        if ( event.target === element ) {
+                            this.destroy();
+                        }
+                    }
+                } );
+                this.document = $( element.style ?
+
+                    // Element within the document
+                    element.ownerDocument :
+
+                    // Element is window or document
+                    element.document || element );
+                this.window = $( this.document[ 0 ].defaultView || this.document[ 0 ].parentWindow );
+            }
+
+//            this.options = langx.mixin( {},
+//                this.options,
+//                this._getCreateOptions(),
+//                options );
+
+            this._create();
+
+            this._trigger( "create", null, this._getCreateEventData() );
+
+            this._init();
+        },
+
+//        _getCreateOptions: function() {
+//            return {};
+//        },
+
+        _getCreateEventData: langx.noop,
+
+        _create: langx.noop,
+
+        _init: langx.noop,
+
+		_classes: function( options ) {
+			var full = [];
+			var that = this;
+
+			options = objects.mixin( {
+				element: this.element,
+				classes: this.options.classes || {}
+			}, options );
+
+
+			function bindRemoveEvent() {
+				options.element.each( function( _, element ) {
+					var isTracked = langx.map( that.classesElementLookup, function( elements ) {
+						return elements;
+					} )
+						.some( function(elements ) {
+							return $(elements).is( element );
+						} );
+
+					if ( !isTracked ) {
+						that._on( $( element ), {
+							remove: "_untrackClassesElement"
+						} );
+					}
+				} );
+			}
+
+			function processClassString( classes, checkOption ) {
+				var current, i;
+				for ( i = 0; i < classes.length; i++ ) {
+					current = that.classesElementLookup[ classes[ i ] ] || $();
+					if ( options.add ) {
+						bindRemoveEvent();
+						current = $( langx.uniq( current.get().concat( options.element.get() ) ) );
+					} else {
+						current = $( current.not( options.element ).get() );
+					}
+					that.classesElementLookup[ classes[ i ] ] = current;
+					full.push( classes[ i ] );
+					if ( checkOption && options.classes[ classes[ i ] ] ) {
+						full.push( options.classes[ classes[ i ] ] );
+					}
+				}
+			}
+
+			if ( options.keys ) {
+				processClassString( options.keys.match( /\S+/g ) || [], true );
+			}
+			if ( options.extra ) {
+				processClassString( options.extra.match( /\S+/g ) || [] );
+			}
+
+			return full.join( " " );
+		},
+
+		_untrackClassesElement: function( event ) {
+			var that = this;
+			langx.each( that.classesElementLookup, function( key, value ) {
+				if ( arrays.inArray( event.target, value ) !== -1 ) {
+					that.classesElementLookup[ key ] = $( value.not( event.target ).get() );
+				}
+			} );
+
+			this._off( $( event.target ) );
+		},
+
+		_removeClass: function( element, keys, extra ) {
+			return this._toggleClass( element, keys, extra, false );
+		},
+
+		_addClass: function( element, keys, extra ) {
+			return this._toggleClass( element, keys, extra, true );
+		},
+
+		_toggleClass: function( element, keys, extra, add ) {
+			add = ( typeof add === "boolean" ) ? add : extra;
+			var shift = ( typeof element === "string" || element === null ),
+				options = {
+					extra: shift ? keys : extra,
+					keys: shift ? element : keys,
+					element: shift ? this.element : element,
+					add: add
+				};
+			options.element.toggleClass( this._classes( options ), add );
+			return this;
+		},
+
+		_on: function( suppressDisabledCheck, element, handlers ) {
+			var delegateElement;
+			var instance = this;
+
+			// No suppressDisabledCheck flag, shuffle arguments
+			if ( typeof suppressDisabledCheck !== "boolean" ) {
+				handlers = element;
+				element = suppressDisabledCheck;
+				suppressDisabledCheck = false;
+			}
+
+			// No element argument, shuffle and use this.element
+			if ( !handlers ) {
+				handlers = element;
+				element = this.element;
+				delegateElement = this.widget();
+			} else {
+				element = delegateElement = $( element );
+				this.bindings = this.bindings.add( element );
+			}
+
+			objects.each( handlers, function( event, handler ) {
+				function handlerProxy() {
+
+					// Allow widgets to customize the disabled handling
+					// - disabled as an array instead of boolean
+					// - disabled class as method for disabling individual parts
+					if ( !suppressDisabledCheck &&
+							( instance.options.disabled === true ||
+							$( this ).hasClass( "ui-state-disabled" ) ) ) {
+						return;
+					}
+					return ( typeof handler === "string" ? instance[ handler ] : handler )
+						.apply( instance, arguments );
+				}
+
+				// Copy the guid so direct unbinding works
+				if ( typeof handler !== "string" ) {
+					handlerProxy.guid = handler.guid =
+						handler.guid || handlerProxy.guid || $.guid++;
+				}
+
+				var match = event.match( /^([\w:-]*)\s*(.*)$/ );
+				var eventName = match[ 1 ] + instance.eventNamespace;
+				var selector = match[ 2 ];
+
+				if ( selector ) {
+					delegateElement.on( eventName, selector, handlerProxy );
+				} else {
+					element.on( eventName, handlerProxy );
+				}
+			} );
+		},
+
+		_off: function( element, eventName ) {
+			eventName = ( eventName || "" ).split( " " ).join( this.eventNamespace + " " ) +
+				this.eventNamespace;
+			element.off( eventName );
+
+			// Clear the stack to avoid memory leaks (#10056)
+			this.bindings = $( this.bindings.not( element ).get() );
+			this.focusable = $( this.focusable.not( element ).get() );
+			this.hoverable = $( this.hoverable.not( element ).get() );
+		},
+
+		_trigger: function( type, event, data ) {
+			var prop, orig;
+			var callback = this.options[ type ];
+
+			data = data || {};
+			event = eventer.proxy( event );
+			event.type = ( type === this.widgetEventPrefix ?
+				type :
+				this.widgetEventPrefix + type ).toLowerCase();
+
+			// The original event may come from any element
+			// so we need to reset the target on the new event
+			event.target = this.element[ 0 ];
+
+			// Copy original event properties over to the new event
+			orig = event.originalEvent;
+			if ( orig ) {
+				for ( prop in orig ) {
+					if ( !( prop in event ) ) {
+						event[ prop ] = orig[ prop ];
+					}
+				}
+			}
+
+			this.element.trigger( event, data );
+			return !( types.isFunction( callback ) &&
+				callback.apply( this.element[ 0 ], [ event ].concat( data ) ) === false ||
+				event.isDefaultPrevented() );
+		}
+
+	});
+
+	return JqPlugin;
+});
+/*!
+ * jQuery UI Widget @VERSION
+ * http://jqueryui.com
+ *
+ * Copyright jQuery Foundation and other contributors
+ * Released under the MIT license.
+ * http://jquery.org/license
+ */
+
+//>>label: Widget
+//>>group: Core
+//>>description: Provides a factory for creating stateful widgets with a common API.
+//>>docs: http://api.jqueryui.com/jQuery.widget/
+//>>demos: http://jqueryui.com/widget/
+
+define( 'skylark-jquery/widget',[ 
+	"skylark-langx/langx",
+	"skylark-utils-dom/plugins",
+	"./core",
+	"./JqueryPlugin"
+],  function(langx,splugins, $,JqPlugin ) {
+
+	var widgetUuid = 0;
+	var widgetHasOwnProperty = Array.prototype.hasOwnProperty;
+	var widgetSlice = Array.prototype.slice;
+
+	$.cleanData = ( function( orig ) {
+		return function( elems ) {
+			var events, elem, i;
+			for ( i = 0; ( elem = elems[ i ] ) != null; i++ ) {
+
+				// Only trigger remove when necessary to save time
+				events = $._data( elem, "events" );
+				if ( events && events.remove ) {
+					$( elem ).triggerHandler( "remove" );
+				}
+			}
+			orig( elems );
+		};
+	} )( $.cleanData );
+	
+	$.widget = function( name, base, prototype ) {
+		var existingConstructor, constructor, basePrototype;
+
+		// ProxiedPrototype allows the provided prototype to remain unmodified
+		// so that it can be used as a mixin for multiple widgets (#8876)
+		var proxiedPrototype = {};
+
+		var namespace = name.split( "." )[ 0 ];
+		name = name.split( "." )[ 1 ];
+		var fullName = namespace + "-" + name;
+
+		if ( !prototype ) {
+			prototype = base;
+			base = $.Widget;
+		}
+
+		if ( $.isArray( prototype ) ) {
+			prototype = $.extend.apply( null, [ {} ].concat( prototype ) );
+		}
+
+		// Create selector for plugin
+		$.expr.pseudos[ fullName.toLowerCase() ] = function( elem ) {
+			return !!$.data( elem, fullName );
+		};
+
+		$[ namespace ] = $[ namespace ] || {};
+
+		existingConstructor = $[ namespace ][ name ];
+
+		var basePrototype = base.prototype,
+			newPrototype = {};
+
+		for (var key in prototype) {
+			var value = prototype[key];
+
+			if ( $.isPlainObject( value ) ) {
+				newPrototype[ key ] = $.isPlainObject( basePrototype[ key ] ) ?
+					$.widget.extend( {}, basePrototype[ key ], value ) :
+
+					// Don't extend strings, arrays, etc. with objects
+					$.widget.extend( {}, value );
+			} else {
+				newPrototype[key] = value;
+			}
+		}
+
+		var _proto = $.widget.extend({
+
+			// TODO: remove support for widgetEventPrefix
+			// always use the name + a colon as the prefix, e.g., draggable:start
+			// don't prefix for widgets that aren't DOM-based
+			widgetEventPrefix: existingConstructor ? ( base.prototype.widgetEventPrefix || name ) : name
+		}, {
+			options : base.prototype.options
+		},newPrototype, {
+			name : fullName,
+			namespace: namespace,
+			widgetName: name,
+			pluginName : "jqueryui." + (namespace ? namespace + "." : "") + name,
+			widgetFullName: fullName
+		} );
+
+		constructor = $[ namespace ][ name ] = base.inherit(_proto);
+		/*
+
+		constructor = $[ namespace ][ name ] = function( options, element ) {
+
+			// Allow instantiation without "new" keyword
+			if ( !this._createWidget ) {
+				return new constructor( options, element );
+			}
+
+			// Allow instantiation without initializing for simple inheritance
+			// must use "new" keyword (the code above always passes args)
+			if ( arguments.length ) {
+				this._createWidget( options, element );
+			}
+		};
+		*/
+		// Extend with the existing constructor to carry over any static properties
+		$.extend( constructor, existingConstructor, {
+			version: prototype.version,
+
+			// Copy the object used to create the prototype in case we need to
+			// redefine the widget later
+			_proto: _proto,
+
+			// Track widgets that inherit from this widget in case this widget is
+			// redefined after a widget inherits from it
+			_childConstructors: []
+		} );
+
+		/*
+		basePrototype = new base();
+
+		// We need to make the options hash a property directly on the new instance
+		// otherwise we'll modify the options hash on the prototype that we're
+		// inheriting from
+		basePrototype.options = $.widget.extend( {}, basePrototype.options );
+		$.each( prototype, function( prop, value ) {
+			if ( !$.isFunction( value ) ) {
+				proxiedPrototype[ prop ] = value;
+				return;
+			}
+			proxiedPrototype[ prop ] = ( function() {
+				function _super() {
+					return base.prototype[ prop ].apply( this, arguments );
+				}
+
+				function _superApply( args ) {
+					return base.prototype[ prop ].apply( this, args );
+				}
+
+				return function() {
+					var __super = this._super;
+					var __superApply = this._superApply;
+					var returnValue;
+
+					this._super = _super;
+					this._superApply = _superApply;
+
+					returnValue = value.apply( this, arguments );
+
+					this._super = __super;
+					this._superApply = __superApply;
+
+					return returnValue;
+				};
+			} )();
+		} );
+		constructor.prototype = $.widget.extend( basePrototype, {
+
+			// TODO: remove support for widgetEventPrefix
+			// always use the name + a colon as the prefix, e.g., draggable:start
+			// don't prefix for widgets that aren't DOM-based
+			widgetEventPrefix: existingConstructor ? ( basePrototype.widgetEventPrefix || name ) : name
+		}, proxiedPrototype, {
+			constructor: constructor,
+			namespace: namespace,
+			widgetName: name,
+			widgetFullName: fullName
+		} );
+		*/
+		// If this widget is being redefined then we need to find all widgets that
+		// are inheriting from it and redefine all of them so that they inherit from
+		// the new version of this widget. We're essentially trying to replace one
+		// level in the prototype chain.
+		if ( existingConstructor ) {
+			$.each( existingConstructor._childConstructors, function( i, child ) {
+				var childPrototype = child.prototype;
+
+				// Redefine the child widget using the same prototype that was
+				// originally used, but inherit from the new version of the base
+				$.widget( childPrototype.namespace + "." + childPrototype.widgetName, constructor,
+					child._proto );
+			} );
+
+			// Remove the list of existing child constructors from the old constructor
+			// so the old child constructors can be garbage collected
+			delete existingConstructor._childConstructors;
+		} else {
+			if (base._childConstructors) {
+				base._childConstructors.push( constructor );
+			}
+		}
+
+		//$.widget.bridge( name, constructor );
+
+		splugins.register(constructor,name,fullName);
+
+		return constructor;
+	};
+
+	$.widget.extend = function( target ) {
+		var input = widgetSlice.call( arguments, 1 );
+		var inputIndex = 0;
+		var inputLength = input.length;
+		var key;
+		var value;
+
+		for ( ; inputIndex < inputLength; inputIndex++ ) {
+			for ( key in input[ inputIndex ] ) {
+				value = input[ inputIndex ][ key ];
+				if ( widgetHasOwnProperty.call( input[ inputIndex ], key ) && value !== undefined ) {
+
+					// Clone objects
+					if ( $.isPlainObject( value ) ) {
+						target[ key ] = $.isPlainObject( target[ key ] ) ?
+							$.widget.extend( {}, target[ key ], value ) :
+
+							// Don't extend strings, arrays, etc. with objects
+							$.widget.extend( {}, value );
+
+					// Copy everything else by reference
+					} else {
+						target[ key ] = value;
+					}
+				}
+			}
+		}
+		return target;
+	};
+
+
+	$.Widget = 	 JqPlugin.inherit({
+		widgetName: "widget",
+		widgetEventPrefix: "",
+		defaultElement: "<div>",
+
+		options: {
+			classes: {},
+			disabled: false,
+
+			// Callbacks
+			create: null
+		},
+
+	     _initOptions : function(options) {
+	     	options = langx.mixin(this._createOptions(),options);
+
+			this.overrided(options);
+		},
+
+		_createOptions : function() {
+			return {};
+		},
+
+		_super : function() {
+			if (this.overrided) {
+				return this.overrided.apply(this,arguments);
+			}
+		},
+
+		_superApply : function ( args ) {
+			if (this.overrided) {
+				return this.overrided.apply(this,args);
+			}
+		},
+
+
+		widget: function() {
+			return this.element;
+		},
+
+
+		_setOption: function( key, value ) {
+			if ( key === "classes" ) {
+				this._setOptionClasses( value );
+			}
+
+			this.options[ key ] = value;
+
+			if ( key === "disabled" ) {
+				this._setOptionDisabled( value );
+			}
+
+			return this;
+		},
+
+		_setOptionClasses: function( value ) {
+			var classKey, elements, currentElements;
+
+			for ( classKey in value ) {
+				currentElements = this.classesElementLookup[ classKey ];
+				if ( value[ classKey ] === this.options.classes[ classKey ] ||
+						!currentElements ||
+						!currentElements.length ) {
+					continue;
+				}
+
+				// We are doing this to create a new jQuery object because the _removeClass() call
+				// on the next line is going to destroy the reference to the current elements being
+				// tracked. We need to save a copy of this collection so that we can add the new classes
+				// below.
+				elements = $( currentElements.get() );
+				this._removeClass( currentElements, classKey );
+
+				// We don't use _addClass() here, because that uses this.options.classes
+				// for generating the string of classes. We want to use the value passed in from
+				// _setOption(), this is the new value of the classes option which was passed to
+				// _setOption(). We pass this value directly to _classes().
+				elements.addClass( this._classes( {
+					element: elements,
+					keys: classKey,
+					classes: value,
+					add: true
+				} ));
+			}
+		},
+
+		_setOptionDisabled: function( value ) {
+			this._toggleClass( this.widget(), this.widgetFullName + "-disabled", null, !!value );
+
+			// If the widget is becoming disabled, then nothing is interactive
+			if ( value ) {
+				this._removeClass( this.hoverable, null, "ui-state-hover" );
+				this._removeClass( this.focusable, null, "ui-state-focus" );
+			}
+		},
+
+		enable: function() {
+			return this._setOptions( { disabled: false } );
+		},
+
+		disable: function() {
+			return this._setOptions( { disabled: true } );
+		},
+
+
+		_delay: function( handler, delay ) {
+			function handlerProxy() {
+				return ( typeof handler === "string" ? instance[ handler ] : handler )
+					.apply( instance, arguments );
+			}
+			var instance = this;
+			return setTimeout( handlerProxy, delay || 0 );
+		},
+
+		_hoverable: function( element ) {
+			this.hoverable = this.hoverable.add( element );
+			this._on( element, {
+				mouseenter: function( event ) {
+					this._addClass( $( event.currentTarget ), null, "ui-state-hover" );
+				},
+				mouseleave: function( event ) {
+					this._removeClass( $( event.currentTarget ), null, "ui-state-hover" );
+				}
+			} );
+		},
+
+		_focusable: function( element ) {
+			this.focusable = this.focusable.add( element );
+			this._on( element, {
+				focusin: function( event ) {
+					this._addClass( $( event.currentTarget ), null, "ui-state-focus" );
+				},
+				focusout: function( event ) {
+					this._removeClass( $( event.currentTarget ), null, "ui-state-focus" );
+				}
+			} );
+		}
+
+	});
+
+	$.Widget._childConstructors = [];
+
+	$.each( { show: "fadeIn", hide: "fadeOut" }, function( method, defaultEffect ) {
+		$.Widget.prototype[ "_" + method ] = function( element, options, callback ) {
+			if ( typeof options === "string" ) {
+				options = { effect: options };
+			}
+
+			var hasOptions;
+			var effectName = !options ?
+				method :
+				options === true || typeof options === "number" ?
+					defaultEffect :
+					options.effect || defaultEffect;
+
+			options = options || {};
+			if ( typeof options === "number" ) {
+				options = { duration: options };
+			}
+
+			hasOptions = !$.isEmptyObject( options );
+			options.complete = callback;
+
+			if ( options.delay ) {
+				element.delay( options.delay );
+			}
+
+			if ( hasOptions && $.effects && $.effects.effect[ effectName ] ) {
+				element[ method ]( options );
+			} else if ( effectName !== method && element[ effectName ] ) {
+				element[ effectName ]( options.duration, options.easing, callback );
+			} else {
+				element.queue( function( next ) {
+					$( this )[ method ]();
+					if ( callback ) {
+						callback.call( element[ 0 ] );
+					}
+					next();
+				} );
+			}
+		};
+	} );
+
+	return $.widget;
+
+});
+
 define('skylark-jquery/main',[
     "./core",
     "./ajax",
     "./callbacks",
     "./deferred",
-    "./queue"
+    "./queue",
+    "./JqueryPlugin",
+    "./widget"
 ], function($) {
     return $;
 });
@@ -11091,7 +12780,7 @@ define('skylark-backbone/backbone',[
 //     Backbone may be freely distributed under the MIT license.
 //     For all details and documentation:
 //     http://backbonejs.org
-	var Backbone = skylark.backbone = {
+	var Backbone  = {
         // set a `X-Http-Method-Override` header.
         emulateHTTP : false,
 
@@ -11101,7 +12790,7 @@ define('skylark-backbone/backbone',[
         // form param named `model`.
         emulateJSON : false,
 
-	}
+	};
     
     Backbone.$ = $;
 
@@ -11115,7 +12804,7 @@ define('skylark-backbone/backbone',[
 	};
 
 
-	return Backbone ;
+	return skylark.attach("itg.backbone",Backbone) ;
 });
 define('skylark-backbone/events',[
   "skylark-langx/langx",
@@ -12863,7 +14552,7 @@ define('skylark-underscore/underscore',[
     return String(this._wrapped);
   };
 
-  return skylark.underscore = _;
+  return skylark.attach("itg.underscore",_);
 });
 define('skylark-backbone/helper',[
   "skylark-langx/langx",
@@ -12969,6 +14658,7 @@ define('skylark-backbone/Collection',[
       // initialization logic.
       initialize: function(){},
 
+      // Proxy `Backbone.sync` by default.
       sync: function() {
         return Backbone.sync.apply(this, arguments);
       }
@@ -13510,567 +15200,6 @@ define('skylark-backbone/Router',[
 });
 
 
-define('skylark-utils-dom/elmx',[
-    "./dom",
-    "./langx",
-    "./datax",
-    "./eventer",
-    "./finder",
-    "./fx",
-    "./geom",
-    "./noder",
-    "./styler",
-    "./query"
-], function(dom, langx, datax, eventer, finder, fx, geom, noder, styler,$) {
-    var map = Array.prototype.map,
-        slice = Array.prototype.slice;
-    /*
-     * VisualElement is a skylark class type wrapping a visule dom node,
-     * provides a number of prototype methods and supports chain calls.
-     */
-    var VisualElement = langx.klass({
-        klassName: "VisualElement",
-
-        "init": function(node) {
-            if (langx.isString(node)) {
-                node = document.getElementById(node);
-            }
-            this._elm = node;
-        }
-    });
-
-    VisualElement.prototype.$ = VisualElement.prototype.query = function(selector) {
-        return $(selector,this._elm);
-    };
-
-    /*
-     * the VisualElement object wrapping document.body
-     */
-    var root = new VisualElement(document.body),
-        elmx = function(node) {
-            if (node) {
-                return new VisualElement(node);
-            } else {
-                return root;
-            }
-        };
-    /*
-     * Extend VisualElement prototype with wrapping the specified methods.
-     * @param {ArrayLike} fn
-     * @param {Object} context
-     */
-    function _delegator(fn, context) {
-        return function() {
-            var self = this,
-                elem = self._elm,
-                ret = fn.apply(context, [elem].concat(slice.call(arguments)));
-
-            if (ret) {
-                if (ret === context) {
-                    return self;
-                } else {
-                    if (ret instanceof HTMLElement) {
-                        ret = new VisualElement(ret);
-                    } else if (langx.isArrayLike(ret)) {
-                        ret = map.call(ret, function(el) {
-                            if (el instanceof HTMLElement) {
-                                return new VisualElement(el);
-                            } else {
-                                return el;
-                            }
-                        })
-                    }
-                }
-            }
-            return ret;
-        };
-    }
-
-    langx.mixin(elmx, {
-        batch: function(nodes, action, args) {
-            nodes.forEach(function(node) {
-                var elm = (node instanceof VisualElement) ? node : elmx(node);
-                elm[action].apply(elm, args);
-            });
-
-            return this;
-        },
-
-        root: new VisualElement(document.body),
-
-        VisualElement: VisualElement,
-
-        partial: function(name, fn) {
-            var props = {};
-
-            props[name] = fn;
-
-            VisualElement.partial(props);
-        },
-
-        delegate: function(names, context) {
-            var props = {};
-
-            names.forEach(function(name) {
-                props[name] = _delegator(context[name], context);
-            });
-
-            VisualElement.partial(props);
-        }
-    });
-
-    // from ./datax
-    elmx.delegate([
-        "attr",
-        "data",
-        "prop",
-        "removeAttr",
-        "removeData",
-        "text",
-        "val"
-    ], datax);
-
-    // from ./eventer
-    elmx.delegate([
-        "off",
-        "on",
-        "one",
-        "shortcuts",
-        "trigger"
-    ], eventer);
-
-    // from ./finder
-    elmx.delegate([
-        "ancestor",
-        "ancestors",
-        "children",
-        "descendant",
-        "find",
-        "findAll",
-        "firstChild",
-        "lastChild",
-        "matches",
-        "nextSibling",
-        "nextSiblings",
-        "parent",
-        "previousSibling",
-        "previousSiblings",
-        "siblings"
-    ], finder);
-
-    /*
-     * find a dom element matched by the specified selector.
-     * @param {String} selector
-     */
-    elmx.find = function(selector) {
-        if (selector === "body") {
-            return this.root;
-        } else {
-            return this.root.descendant(selector);
-        }
-    };
-
-    // from ./fx
-    elmx.delegate([
-        "animate",
-        "fadeIn",
-        "fadeOut",
-        "fadeTo",
-        "fadeToggle",
-        "hide",
-        "scrollToTop",
-        "show",
-        "toggle"
-    ], fx);
-
-
-    // from ./geom
-    elmx.delegate([
-        "borderExtents",
-        "boundingPosition",
-        "boundingRect",
-        "clientHeight",
-        "clientSize",
-        "clientWidth",
-        "contentRect",
-        "height",
-        "marginExtents",
-        "offsetParent",
-        "paddingExtents",
-        "pagePosition",
-        "pageRect",
-        "relativePosition",
-        "relativeRect",
-        "scrollIntoView",
-        "scrollLeft",
-        "scrollTop",
-        "size",
-        "width"
-    ], geom);
-
-    // from ./noder
-    elmx.delegate([
-        "after",
-        "append",
-        "before",
-        "clone",
-        "contains",
-        "contents",
-        "empty",
-        "html",
-        "isChildOf",
-        "ownerDoc",
-        "prepend",
-        "remove",
-        "removeChild",
-        "replace",
-        "reverse",
-        "throb",
-        "traverse",
-        "wrapper",
-        "wrapperInner",
-        "unwrap"
-    ], noder);
-
-    // from ./styler
-    elmx.delegate([
-        "addClass",
-        "className",
-        "css",
-        "hasClass",
-        "hide",
-        "isInvisible",
-        "removeClass",
-        "show",
-        "toggleClass"
-    ], styler);
-
-    // properties
-
-    var properties = [ 'position', 'left', 'top', 'right', 'bottom', 'width', 'height', 'border', 'borderLeft',
-    'borderTop', 'borderRight', 'borderBottom', 'borderColor', 'display', 'overflow', 'margin', 'marginLeft', 'marginTop', 'marginRight', 'marginBottom', 'padding', 'paddingLeft', 'paddingTop', 'paddingRight', 'paddingBottom', 'color',
-    'background', 'backgroundColor', 'opacity', 'fontSize', 'fontWeight', 'textAlign', 'textDecoration', 'textTransform', 'cursor', 'zIndex' ];
-
-    properties.forEach( function ( property ) {
-
-        var method = property;
-
-        VisualElement.prototype[method ] = function (value) {
-
-            this.css( property, value );
-
-            return this;
-
-        };
-
-    });
-
-    // events
-    var events = [ 'keyUp', 'keyDown', 'mouseOver', 'mouseOut', 'click', 'dblClick', 'change' ];
-
-    events.forEach( function ( event ) {
-
-        var method = event;
-
-        VisualElement.prototype[method ] = function ( callback ) {
-
-            this.on( event.toLowerCase(), callback);
-
-            return this;
-        };
-
-    });
-
-
-    return dom.elmx = elmx;
-});
-define('skylark-utils-dom/plugins',[
-    "./dom",
-    "./langx",
-    "./noder",
-    "./datax",
-    "./eventer",
-    "./finder",
-    "./geom",
-    "./styler",
-    "./fx",
-    "./query",
-    "./elmx"
-], function(dom, langx, noder, datax, eventer, finder, geom, styler, fx, $, elmx) {
-    "use strict";
-
-    var slice = Array.prototype.slice,
-        concat = Array.prototype.concat,
-        pluginKlasses = {},
-        shortcuts = {};
-
-    /*
-     * Create or get or destory a plugin instance assocated with the element.
-     */
-    function instantiate(elm,pluginName,options) {
-        var pluginInstance = datax.data( elm, pluginName );
-
-        if (options === "instance") {
-            return pluginInstance;
-        } else if (options === "destroy") {
-            if (!pluginInstance) {
-                throw new Error ("The plugin instance is not existed");
-            }
-            pluginInstance.destroy();
-            datax.removeData( elm, pluginName);
-            pluginInstance = undefined;
-        } else {
-            if (!pluginInstance) {
-                if (options !== undefined && typeof options !== "object") {
-                    throw new Error ("The options must be a plain object");
-                }
-                var pluginKlass = pluginKlasses[pluginName]; 
-                pluginInstance = new pluginKlass(elm,options);
-                datax.data( elm, pluginName,pluginInstance );
-            } else if (options) {
-                pluginInstance.reset(options);
-            }
-        }
-
-        return pluginInstance;
-    }
-
-    function shortcutter(pluginName,extfn) {
-       /*
-        * Create or get or destory a plugin instance assocated with the element,
-        * and also you can execute the plugin method directory;
-        */
-        return function (elm,options) {
-            var  plugin = instantiate(elm, pluginName,"instance");
-            if ( options === "instance" ) {
-              return plugin || null;
-            }
-            if (!plugin) {
-                plugin = instantiate(elm, pluginName,typeof options == 'object' && options || {});
-            }
-
-            if (options) {
-                var args = slice.call(arguments,1);
-                if (extfn) {
-                    return extfn.apply(plugin,args);
-                } else {
-                    if (typeof options == 'string') {
-                        var methodName = options;
-
-                        if ( !plugin ) {
-                            throw new Error( "cannot call methods on " + pluginName +
-                                " prior to initialization; " +
-                                "attempted to call method '" + methodName + "'" );
-                        }
-
-                        if ( !langx.isFunction( plugin[ methodName ] ) || methodName.charAt( 0 ) === "_" ) {
-                            throw new Error( "no such method '" + methodName + "' for " + pluginName +
-                                " plugin instance" );
-                        }
-
-                        plugin[methodName].apply(plugin,args);
-                    }                
-                }                
-            }
-
-        }
-
-    }
-
-    /*
-     * Register a plugin type
-     */
-    function register( pluginKlass,shortcutName,extfn) {
-        var pluginName = pluginKlass.prototype.pluginName;
-        
-        pluginKlasses[pluginName] = pluginKlass;
-
-        if (shortcutName) {
-            var shortcut = shortcuts[shortcutName] = shortcutter(pluginName,extfn);
-                
-            $.fn[shortcutName] = function(options) {
-                var returnValue = this;
-
-                if ( !this.length && options === "instance" ) {
-                  returnValue = undefined;
-                } else {
-                  this.each(function () {
-                    var  ret  = shortcut(this,options);
-                    if (ret !== undefined) {
-                        returnValue = ret;
-                        return false;
-                    }
-                  });
-                }
-
-                return returnValue;
-            };
-
-            elmx.partial(shortcutName,function(options) {
-                var  ret  = shortcut(this._elm,options);
-                if (ret === undefined) {
-                    ret = this;
-                }
-                return ret;
-            });
-
-        }
-    }
-
- 
-    var Plugin =   langx.Evented.inherit({
-        klassName: "Plugin",
-
-        _construct : function(elm,options) {
-           this._elm = elm;
-           this._initOptions(options);
-        },
-
-        _initOptions : function(options) {
-          var ctor = this.constructor,
-              cache = ctor.cache = ctor.cache || {},
-              defaults = cache.defaults;
-          if (!defaults) {
-            var  ctors = [];
-            do {
-              ctors.unshift(ctor);
-              if (ctor === Plugin) {
-                break;
-              }
-              ctor = ctor.superclass;
-            } while (ctor);
-
-            defaults = cache.defaults = {};
-            for (var i=0;i<ctors.length;i++) {
-              ctor = ctors[i];
-              if (ctor.prototype.hasOwnProperty("options")) {
-                langx.mixin(defaults,ctor.prototype.options);
-              }
-              if (ctor.hasOwnProperty("options")) {
-                langx.mixin(defaults,ctor.options);
-              }
-            }
-          }
-          Object.defineProperty(this,"options",{
-            value :langx.mixin({},defaults,options)
-          });
-
-          //return this.options = langx.mixin({},defaults,options);
-          return this.options;
-        },
-
-
-        destroy: function() {
-            var that = this;
-
-            this._destroy();
-            // We can probably remove the unbind calls in 2.0
-            // all event bindings should go through this._on()
-            datax.removeData(this._elm,this.pluginName );
-        },
-
-        _destroy: langx.noop,
-
-        _delay: function( handler, delay ) {
-            function handlerProxy() {
-                return ( typeof handler === "string" ? instance[ handler ] : handler )
-                    .apply( instance, arguments );
-            }
-            var instance = this;
-            return setTimeout( handlerProxy, delay || 0 );
-        },
-
-        option: function( key, value ) {
-            var options = key;
-            var parts;
-            var curOption;
-            var i;
-
-            if ( arguments.length === 0 ) {
-
-                // Don't return a reference to the internal hash
-                return langx.mixin( {}, this.options );
-            }
-
-            if ( typeof key === "string" ) {
-
-                // Handle nested keys, e.g., "foo.bar" => { foo: { bar: ___ } }
-                options = {};
-                parts = key.split( "." );
-                key = parts.shift();
-                if ( parts.length ) {
-                    curOption = options[ key ] = langx.mixin( {}, this.options[ key ] );
-                    for ( i = 0; i < parts.length - 1; i++ ) {
-                        curOption[ parts[ i ] ] = curOption[ parts[ i ] ] || {};
-                        curOption = curOption[ parts[ i ] ];
-                    }
-                    key = parts.pop();
-                    if ( arguments.length === 1 ) {
-                        return curOption[ key ] === undefined ? null : curOption[ key ];
-                    }
-                    curOption[ key ] = value;
-                } else {
-                    if ( arguments.length === 1 ) {
-                        return this.options[ key ] === undefined ? null : this.options[ key ];
-                    }
-                    options[ key ] = value;
-                }
-            }
-
-            this._setOptions( options );
-
-            return this;
-        },
-
-        _setOptions: function( options ) {
-            var key;
-
-            for ( key in options ) {
-                this._setOption( key, options[ key ] );
-            }
-
-            return this;
-        },
-
-        _setOption: function( key, value ) {
-
-            this.options[ key ] = value;
-
-            return this;
-        }
-
-    });
-
-    $.fn.plugin = function(name,options) {
-        var args = slice.call( arguments, 1 ),
-            self = this,
-            returnValue = this;
-
-        this.each(function(){
-            returnValue = instantiate.apply(self,[this,name].concat(args));
-        });
-        return returnValue;
-    };
-
-    elmx.partial("plugin",function(name,options) {
-        var args = slice.call( arguments, 1 );
-        return instantiate.apply(this,[this.domNode,name].concat(args));
-    }); 
-
-
-    function plugins() {
-        return plugins;
-    }
-     
-    langx.mixin(plugins, {
-        instantiate,
-        Plugin,
-        register,
-        shortcuts
-    });
-
-    return plugins;
-});
 define('skylark-backbone/View',[
   "skylark-langx/langx",
   "skylark-utils-dom/query",
