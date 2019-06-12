@@ -1,6 +1,6 @@
 define([
 	"skylark-langx/skylark",
-    "skylark-fw-model",
+    "skylark-data-entities",
 	"skylark-jquery"
 ],function(skylark, models,$){
 //     from Backbone.js 1.2.3

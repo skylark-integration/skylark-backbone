@@ -3625,14 +3625,14 @@ define('skylark-langx/langx',[
 
     return skylark.langx = langx;
 });
-define('skylark-fw-model/models',[
+define('skylark-data-entities/entities',[
     "skylark-langx/langx"
 ], function(langx) {
-    function models() {
-        return models;
+    function entities() {
+        return entities;
     }
 
-    langx.mixin(models, {
+    langx.mixin(entities, {
         // set a `X-Http-Method-Override` header.
         emulateHTTP : false,
 
@@ -3648,13 +3648,13 @@ define('skylark-fw-model/models',[
     });
 
 
-    return models;
+    return entities;
 });
 
-define('skylark-fw-model/Entity',[
+define('skylark-data-entities/Entity',[
 	"skylark-langx/langx",
-	"./models"
-],function(langx,models){
+	"./entities"
+],function(langx,entities){
    // Wrap an optional error callback with a fallback error event.
   var wrapError = function(model, options) {
     var error = options.error;
@@ -3667,7 +3667,7 @@ define('skylark-fw-model/Entity',[
  
   var Entity = langx.Stateful.inherit({
     sync: function() {
-      return models.sync.apply(this, arguments);
+      return entities.sync.apply(this, arguments);
     },
 
     // Get the HTML-escaped value of an attribute.
@@ -3801,14 +3801,14 @@ define('skylark-fw-model/Entity',[
     }
   });
 
-  return models.Entity = Entity;
+  return entities.Entity = Entity;
 
 });
-define('skylark-fw-model/Collection',[
+define('skylark-data-entities/Collection',[
 	"skylark-langx/langx",
-	"./models",
+	"./entities",
 	"./Entity"
-],function(langx,models,Entity){
+],function(langx,entities,Entity){
   // Wrap an optional error callback with a fallback error event.
   var wrapError = function(model, options) {
     var error = options.error;
@@ -3861,9 +3861,9 @@ define('skylark-fw-model/Collection',[
 		  return this.map(function(entity) { return entity.toJSON(options); });
 		},
 
-		// Proxy `models.sync` by default.
+		// Proxy `entities.sync` by default.
 		sync: function() {
-		  return models.sync.apply(this, arguments);
+		  return entities.sync.apply(this, arguments);
 		},
 
 		// Add a entity, or list of entities to the set. `entities` may be Backbone
@@ -4257,13 +4257,14 @@ define('skylark-fw-model/Collection',[
 
   	});
 
-	return models.Collection = Collection;
+	return entities.Collection = Collection;
 });
-define('skylark-fw-model/backends/registry',[
-	"skylark-langx/langx",
-	"../models"
-],function(langx,models){
-	var providers = {};
+define('skylark-data-entities/backends/registry',[
+	
+],function(){
+	var providers = {
+
+	};
 
 	function add(name,setting) {
 		providers[name] = setting;
@@ -4277,17 +4278,17 @@ define('skylark-fw-model/backends/registry',[
 		return providers[name];
 	}
 
-	return models.backends.registry = {
+	return {
 		add : add,
 		remove: remove,
 		get : get
-	};
+	}
 });
-define('skylark-fw-model/sync',[
+define('skylark-data-entities/sync',[
 	"skylark-langx/langx",
-	"./models",
+	"./entities",
   	"./backends/registry"
-],function(langx,models,registry){
+],function(langx,entities,registry){
 
 	// Override 'Backbone.sync' to default to localSync,
 	// the original 'Backbone.sync' is still available in 'Backbone.ajaxSync'
@@ -4309,13 +4310,13 @@ define('skylark-fw-model/sync',[
 	};
 
   
-   return models.sync = sync;
+   return entities.sync = sync;
 
 });
-define('skylark-fw-model/backends/ajaxSync',[
+define('skylark-data-entities/backends/ajaxSync',[
 	"skylark-langx/langx",
-	"../models"
-],function(langx,models){
+	"../entities"
+],function(langx,entities){
 // Map from CRUD to HTTP for our default `Backbone.sync` implementation.
   var methodMap = {
     'create': 'POST',
@@ -4331,8 +4332,8 @@ define('skylark-fw-model/backends/ajaxSync',[
 
     // Default options, unless specified.
     langx.defaults(options || (options = {}), {
-      emulateHTTP: models.emulateHTTP,
-      emulateJSON: models.emulateJSON
+      emulateHTTP: entities.emulateHTTP,
+      emulateJSON: entities.emulateJSON
     });
 
     // Default JSON-request options.
@@ -4388,13 +4389,13 @@ define('skylark-fw-model/backends/ajaxSync',[
 
  
   
-  return models.backends.ajaxSync = sync;
+  return entities.backends.ajaxSync = sync;
 
 });
-define('skylark-fw-model/backends/localSync',[
+define('skylark-data-entities/backends/localSync',[
   "skylark-langx/langx",
-  "../models"
-],function(langx,models){
+  "../entities"
+],function(langx,entities){
 
   // A simple module to replace `Backbone.sync` with *localStorage*-based
   // persistence. Models are given GUIDS, and saved into a JSON object. Simple
@@ -4454,7 +4455,7 @@ define('skylark-fw-model/backends/localSync',[
       return this.jsonData(this.localStorage().getItem(this.name+"-"+model.id));
     },
 
-    // Return the array of all models currently in storage.
+    // Return the array of all entities currently in storage.
     findAll: function() {
       return _(this.records).chain()
         .map(function(id){
@@ -4542,23 +4543,23 @@ define('skylark-fw-model/backends/localSync',[
     return syncDfd && syncDfd.promise();
   };
 
-  models.backends.LocalStorage = sync.LocalStorage = LocalStorage;
+  entities.backends.LocalStorage = sync.LocalStorage = LocalStorage;
   
-  return models.backends.localSync = sync;
+  return entities.backends.localSync = sync;
 
 });
-define('skylark-fw-model/main',[
-	"./models",
+define('skylark-data-entities/main',[
+	"./entities",
 	"./Collection",
 	"./Entity",
 	"./sync",
 	"./backends/ajaxSync",
 	"./backends/localSync",
 	"./backends/registry"
-],function(models){
-	return models;
+],function(entities){
+	return entities;
 });
-define('skylark-fw-model', ['skylark-fw-model/main'], function (main) { return main; });
+define('skylark-data-entities', ['skylark-data-entities/main'], function (main) { return main; });
 
 define('skylark-utils-dom/skylark',["skylark-langx/skylark"], function(skylark) {
     return skylark;
@@ -12771,7 +12772,7 @@ define('skylark-jquery', ['skylark-jquery/main'], function (main) { return main;
 
 define('skylark-backbone/backbone',[
 	"skylark-langx/skylark",
-    "skylark-fw-model",
+    "skylark-data-entities",
 	"skylark-jquery"
 ],function(skylark, models,$){
 //     from Backbone.js 1.2.3
@@ -14625,7 +14626,7 @@ define('skylark-backbone/helper',[
 });
 define('skylark-backbone/Collection',[
   "skylark-langx/langx",
-  "skylark-fw-model",
+  "skylark-data-entities",
   "./backbone",
   "./events",
   "./helper"
@@ -14706,7 +14707,7 @@ define('skylark-backbone/Collection',[
 define('skylark-backbone/Model',[
   "skylark-langx/langx",
   "skylark-underscore/underscore",
-  "skylark-fw-model",
+  "skylark-data-entities",
   "./backbone",
   "./events",
   "./helper"

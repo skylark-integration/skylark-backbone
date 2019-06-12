@@ -8,7 +8,7 @@
     "backbone"
   ],
   "dependencies": {
-    "skylark-fw-model": "git+https://github.com/skylarkfw/skylark-fw-model.git#master",
+    "skylark-data-entities": "git+https://github.com/skylark-data/skylark-data-entities.git#master",
     "skylark-jquery": "git+https://github.com/skylark-integration/skylark-jquery.git#master",
     "skylark-langx": "git+https://github.com/skylarklangx/skylark-langx.git#master",
     "skylark-underscore": "git+https://github.com/skylark-integration/skylark-underscore.git#master",

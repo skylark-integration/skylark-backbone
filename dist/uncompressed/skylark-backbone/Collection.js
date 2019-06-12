@@ -1,6 +1,6 @@
 define([
   "skylark-langx/langx",
-  "skylark-fw-model",
+  "skylark-data-entities",
   "./backbone",
   "./events",
   "./helper"

@@ -88,7 +88,7 @@
 
 define('skylark-backbone/backbone',[
 	"skylark-langx/skylark",
-    "skylark-fw-model",
+    "skylark-data-entities",
 	"skylark-jquery"
 ],function(skylark, models,$){
 //     from Backbone.js 1.2.3
@@ -260,7 +260,7 @@ define('skylark-backbone/helper',[
 });
 define('skylark-backbone/Collection',[
   "skylark-langx/langx",
-  "skylark-fw-model",
+  "skylark-data-entities",
   "./backbone",
   "./events",
   "./helper"
@@ -341,7 +341,7 @@ define('skylark-backbone/Collection',[
 define('skylark-backbone/Model',[
   "skylark-langx/langx",
   "skylark-underscore/underscore",
-  "skylark-fw-model",
+  "skylark-data-entities",
   "./backbone",
   "./events",
   "./helper"
