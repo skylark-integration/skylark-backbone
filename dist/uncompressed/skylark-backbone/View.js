@@ -1,8 +1,8 @@
 define([
   "skylark-langx/langx",
-  "skylark-utils-dom/query",
-  "skylark-utils-dom/noder",
-  "skylark-utils-dom/plugins",
+  "skylark-jquery",
+  "skylark-domx-noder",
+  "skylark-domx-plugins",
   "skylark-underscore/underscore",
   "./backbone",
   "./events",

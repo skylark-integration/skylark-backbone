@@ -5,7 +5,8 @@ define([
 	"./Model",
 	"./History",
 	"./Router",
-	"./View"
+	"./View",
+	"./UndoManager"
 ],function(backbone){
 	return backbone;
 });

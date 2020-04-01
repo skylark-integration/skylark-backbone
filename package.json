@@ -11,9 +11,14 @@
     "skylark-data-entities": "git+https://github.com/skylark-data/skylark-data-entities.git#master",
     "skylark-jquery": "git+https://github.com/skylark-integration/skylark-jquery.git#master",
     "skylark-langx": "git+https://github.com/skylarklangx/skylark-langx.git#master",
-    "skylark-underscore": "git+https://github.com/skylark-integration/skylark-underscore.git#master",
-    "skylark-utils-dom": "git+https://github.com/skylarkutils/skylark-utils-dom.git#master"
+    "skylark-underscore": "git+https://github.com/skylark-integration/skylark-underscore.git#master"
   },
+  "files": [
+    "demo/",
+    "dist/",
+    "src/",
+    "skins/"
+  ],  
   "scripts": {
     "build": "sbundle build ."
   },

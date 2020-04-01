@@ -5,5 +5,5 @@
  * @link 
  * @license MIT
  */
-define(["./backbone","./events","./Collection","./Model","./History","./Router","./View"],function(e){return e});
+define(["./backbone","./events","./Collection","./Model","./History","./Router","./View","./UndoManager"],function(e){return e});
 //# sourceMappingURL=sourcemaps/main.js.map
