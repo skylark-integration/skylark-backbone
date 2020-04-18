@@ -49,6 +49,7 @@ define([
      on : EventedProto.on,
      once: EventedProto.once,
      stopListening: EventedProto.stopListening,
+     emit: EventedProto.emit,
      trigger: EventedProto.trigger,
      unbind: EventedProto.unbind,
      unlistenTo: EventedProto.unlistenTo
