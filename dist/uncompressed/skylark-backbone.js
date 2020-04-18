@@ -134,6 +134,7 @@ define('skylark-backbone/events',[
 
   var EventExtends = {
       on  : function(name, callback, context){
+          context = context || this;
           var fn =  function() {
             var args = slice.call(arguments,1);
             if (name=="all") {
